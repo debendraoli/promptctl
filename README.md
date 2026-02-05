@@ -374,6 +374,28 @@ promptctl generate --size full --role senior
 promptctl generate --preset security --sections error-handling
 ```
 
+### Copy-Paste for Agent Prompts
+
+Add this to your AI agent's system prompt or MCP server instructions:
+
+```
+You have access to `promptctl` CLI for fetching language-specific coding guidelines.
+
+Before writing code in any supported language, fetch the appropriate guidelines:
+- `promptctl show <language>` - Get full guidelines (rust, go, leo, typescript, solidity)
+- `promptctl show <language> --role <role>` - Role-specific (developer, senior, reviewer, security, performance)
+- `promptctl generate --size minimal` - Token-efficient guidelines (~500 tokens)
+- `promptctl generate --sections <sections>` - Specific sections (error-handling, testing, async, concurrency, types, memory, security)
+
+Workflow:
+1. Detect project language: `promptctl scan`
+2. Fetch guidelines before coding: `promptctl show rust` or `promptctl generate`
+3. For security-sensitive code: `promptctl show <lang> --role security`
+4. For code reviews: `promptctl show <lang> --role reviewer`
+
+Always follow the fetched guidelines when generating code.
+```
+
 ## Token Estimates
 
 | Size | Tokens | Use Case |
