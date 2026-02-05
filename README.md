@@ -4,7 +4,7 @@ A personal CLI tool for managing coding prompts across projects with project ind
 
 ## Features
 
-- **Built-in prompts** for Rust (1.92), Go (1.25), and Leo (Aleo smart contracts) with modern, idiomatic guidelines
+- **Built-in prompts** for Rust (1.93), Go (1.25), Leo (Aleo smart contracts), TypeScript (5.9), and Solidity (0.8.28) with modern, idiomatic guidelines
 - **Project indexing** - Automatically detects languages, frameworks, and project structure
 - **Role selection** - Apply different personas (developer, reviewer, security, etc.)
 - **Tiered sizes** - Minimal (~500 tokens), compact (~1500), or full (~3000) prompts
@@ -16,15 +16,25 @@ A personal CLI tool for managing coding prompts across projects with project ind
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
 ```bash
-cargo install --path .
+brew tap debendraoli/promptctl
+brew install promptctl
 ```
 
-Or build from source:
+### From crates.io
 
 ```bash
-cargo build --release
-# Binary will be at target/release/promptctl
+cargo install promptctl
+```
+
+### From source
+
+```bash
+git clone https://github.com/debendraoli/promptctl.git
+cd promptctl
+cargo install --path .
 ```
 
 ## Usage
@@ -41,11 +51,13 @@ promptctl list
 promptctl show rust
 promptctl show go
 promptctl show leo
+promptctl show typescript
+promptctl show solidity
 
 # With a specific role
 promptctl show rust --role reviewer
 promptctl show go --role security
-promptctl show leo --role senior
+promptctl show solidity --role senior
 ```
 
 ### Copy prompt to clipboard
@@ -278,6 +290,88 @@ promptctl generate --preset daily --copy
 # 5. Save your own preset for repeated use
 promptctl preset save mywork --role senior --size compact --smart
 promptctl generate --preset mywork --copy
+```
+
+## Agent Usage Examples
+
+AI coding agents can use `promptctl` to fetch language-specific guidelines before generating code. Here are common patterns:
+
+### Fetch Guidelines Before Coding
+
+```bash
+# Agent fetches Rust guidelines before writing Rust code
+promptctl show rust
+
+# Fetch with specific role for the task
+promptctl show rust --role security    # For security-sensitive code
+promptctl show rust --role reviewer    # Before reviewing PRs
+promptctl show go --role performance   # For performance-critical Go code
+```
+
+### Project-Aware Generation
+
+```bash
+# Let promptctl detect project language and generate appropriate guidelines
+cd /path/to/project
+promptctl generate
+
+# With role based on task
+promptctl generate --role senior       # Architecture decisions
+promptctl generate --role security     # Security audit
+promptctl generate --role mentor       # Learning/explaining
+```
+
+### Token-Efficient Prompts for Agents
+
+```bash
+# Minimal guidelines to save context window
+promptctl generate --size minimal
+
+# Only specific sections relevant to the task
+promptctl generate --sections error-handling,testing
+
+# Quick preset for simple fixes
+promptctl generate --preset quick
+```
+
+### Smart Contract Development
+
+```bash
+# Solidity for EVM chains
+promptctl show solidity
+promptctl show sol --role security     # Smart contract auditing
+
+# Leo for Aleo privacy chains
+promptctl show leo
+```
+
+### Agent Workflow Example
+
+```bash
+# 1. Detect project type
+promptctl scan --json 2>/dev/null || promptctl scan
+
+# 2. Fetch appropriate guidelines
+GUIDELINES=$(promptctl generate --size compact)
+
+# 3. Use guidelines in agent prompt
+echo "$GUIDELINES" | head -100  # Preview
+
+# 4. For specific tasks, use targeted sections
+promptctl generate --sections async,concurrency --role performance
+```
+
+### Combining with Project Context
+
+```bash
+# Generate context-aware prompt with smart filtering
+promptctl generate --smart --role developer
+
+# Full guidelines for complex architectural decisions
+promptctl generate --size full --role senior
+
+# Security review prompt
+promptctl generate --preset security --sections error-handling
 ```
 
 ## Token Estimates

@@ -2,12 +2,12 @@
 
 use crate::prompt_builder::{PromptSection, Section, StructuredPrompt};
 
-pub const RUST_PROMPT: &str = r#"# Rust Development Guidelines (1.92)
+pub const RUST_PROMPT: &str = r#"# Rust Development Guidelines (1.93)
 
 ## Language Version
-- Target **Rust 1.92** stable
+- Target **Rust 1.93** stable
 - Use **edition = "2024"** in Cargo.toml
-- Leverage all stable features available in 1.92
+- Leverage all stable features available in 1.93
 
 ## Code Style & Idioms
 
@@ -17,6 +17,7 @@ pub const RUST_PROMPT: &str = r#"# Rust Development Guidelines (1.92)
 - Embrace ownership and borrowing—avoid unnecessary cloning
 - Use `#[must_use]` on functions returning values that shouldn't be ignored
 - Prefer `impl Trait` in argument and return positions for flexibility
+- Use `#[expect(lint)]` over `#[allow(lint)]` for temporary suppressions
 
 ### Error Handling
 - Use `thiserror` for library error types, `anyhow` for applications
@@ -38,6 +39,7 @@ pub const RUST_PROMPT: &str = r#"# Rust Development Guidelines (1.92)
 - Prefer `&str` over `String` in function parameters
 - Use `Vec::with_capacity` when size is known
 - Leverage iterators and lazy evaluation
+- Use `Box<[T]>` for fixed-size heap allocations
 
 ### Concurrency
 - Use `std::sync` primitives (`Mutex`, `RwLock`, `Arc`)
@@ -49,9 +51,9 @@ pub const RUST_PROMPT: &str = r#"# Rust Development Guidelines (1.92)
 ### Async Rust
 - Use `async`/`await` with `tokio` runtime (or `async-std`)
 - Prefer `tokio::spawn` for concurrent tasks
-- Use `Select` for racing futures
-- Handle cancellation properly with `tokio::select!`
-- Use `async-trait` when needed for trait methods
+- Use `tokio::select!` for racing futures with cancellation
+- Consider `async fn` in traits (stabilized in 1.75+)
+- Use `Future` + `Send` bounds for spawnable tasks
 
 ### Testing
 - Write unit tests in the same file with `#[cfg(test)]`
@@ -116,8 +118,15 @@ pub enum AppError {
 ### Clippy & Formatting
 - Run `cargo fmt` before committing
 - Enable pedantic clippy: `#![warn(clippy::pedantic)]`
-- Address all warnings; use `#[allow(...)]` sparingly with justification
+- Address all warnings; use `#[expect(...)]` with reason for suppressions
 - Use `rustfmt.toml` for team-wide formatting consistency
+
+### Edition 2024 Features
+- `gen` blocks for generators/iterators (unstable, coming soon)
+- Improved `unsafe` block hygiene
+- `async` closures with `async || {}`
+- Enhanced pattern matching ergonomics
+- `let` chains in conditions
 "#;
 
 /// Create a structured Rust prompt with sections
@@ -128,9 +137,9 @@ pub fn structured_prompt() -> StructuredPrompt {
             PromptSection {
                 section: Section::Version,
                 title: "Language Version".to_string(),
-                content: r#"- Target **Rust 1.92** stable
+                content: r#"- Target **Rust 1.93** stable
 - Use **edition = "2024"** in Cargo.toml
-- Leverage all stable features available in 1.92"#
+- Leverage all stable features available in 1.93"#
                     .to_string(),
                 relevance_keywords: vec!["rust", "edition", "version", "cargo"],
             },
@@ -141,7 +150,8 @@ pub fn structured_prompt() -> StructuredPrompt {
 - Prefer zero-cost abstractions
 - Embrace ownership and borrowing—avoid unnecessary cloning
 - Use `#[must_use]` on functions returning values that shouldn't be ignored
-- Prefer `impl Trait` in argument and return positions for flexibility"#
+- Prefer `impl Trait` in argument and return positions for flexibility
+- Use `#[expect(lint)]` over `#[allow(lint)]` for temporary suppressions"#
                     .to_string(),
                 relevance_keywords: vec!["style", "idiom", "ownership", "borrow"],
             },

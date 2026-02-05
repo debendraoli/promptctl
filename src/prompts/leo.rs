@@ -108,7 +108,7 @@ program orchestrator.aleo {
         // Call external async transitions
         let (result1, f1): (u64, Future) = other_program.aleo/action_a(a);
         let (result2, f2): (u64, Future) = other_program.aleo/action_b(b);
-        
+
         // Return future that awaits both
         return finalize_both(f1, f2);
     }
@@ -164,17 +164,17 @@ transition send(
     amount: u64
 ) -> (Token, Token) {
     assert(sender.amount >= amount);
-    
+
     let remaining: Token = Token {
         owner: sender.owner,
         amount: sender.amount - amount,
     };
-    
+
     let sent: Token = Token {
         owner: receiver,
         amount: amount,
     };
-    
+
     return (remaining, sent);
 }
 ```
@@ -232,7 +232,7 @@ program staking.aleo {
         // Mapping operations (public state)
         let current: u64 = Mapping::get_or_use(stakes, staker, 0u64);
         Mapping::set(stakes, staker, current + amount);
-        
+
         let total: u64 = Mapping::get_or_use(total_staked, 0u8, 0u64);
         Mapping::set(total_staked, 0u8, total + amount);
     }
@@ -275,8 +275,8 @@ program my_program.aleo {
         price: u64
     ) -> credits.aleo/credits {
         let change: credits.aleo/credits = credits.aleo/transfer_private(
-            payment, 
-            aleo1merchant..., 
+            payment,
+            aleo1merchant...,
             price
         );
         return change;
@@ -287,9 +287,9 @@ program my_program.aleo {
         payment: credits.aleo/credits,
         price: u64
     ) -> (credits.aleo/credits, Future) {
-        let (change, pay_future): (credits.aleo/credits, Future) = 
+        let (change, pay_future): (credits.aleo/credits, Future) =
             credits.aleo/transfer_private_with_fee(payment, aleo1merchant..., price);
-        
+
         return (change, finalize_purchase(pay_future, self.caller, price));
     }
 
@@ -308,7 +308,7 @@ transition withdraw(token: Token, amount: u64) -> Token {
     // Will fail proof generation if false
     assert(token.amount >= amount);
     assert(self.caller == token.owner);
-    
+
     return Token {
         owner: token.owner,
         amount: token.amount - amount,
@@ -329,19 +329,19 @@ transition test_mint() {
     assert_eq(token.amount, 100u64);
 }
 
-@test 
+@test
 transition test_transfer() {
     let sender_token: Token = Token {
         owner: aleo1sender...,
         amount: 100u64,
     };
-    
+
     let (remaining, sent): (Token, Token) = transfer(
-        sender_token, 
-        aleo1receiver..., 
+        sender_token,
+        aleo1receiver...,
         30u64
     );
-    
+
     assert_eq(remaining.amount, 70u64);
     assert_eq(sent.amount, 30u64);
 }
@@ -398,7 +398,7 @@ async function finalize_shield(owner: address, amount: u64) {
     Mapping::set(balances, owner, balance - amount);
 }
 
-// Unshielding - convert private to public  
+// Unshielding - convert private to public
 async transition unshield(token: Token, public amount: u64) -> Future {
     assert(token.amount >= amount);
     return finalize_unshield(self.caller, amount);
@@ -443,36 +443,36 @@ program token.aleo {
         owner: address,
         amount: u64,
     }
-    
+
     mapping total_supply: u8 => u64;
-    
+
     async transition mint(amount: u64) -> (Token, Future) {
         let token: Token = Token { owner: self.caller, amount };
         return (token, finalize_mint(amount));
     }
-    
+
     async function finalize_mint(amount: u64) {
         let supply: u64 = Mapping::get_or_use(total_supply, 0u8, 0u64);
         Mapping::set(total_supply, 0u8, supply + amount);
     }
-    
+
     transition transfer(
-        sender: Token, 
-        receiver: address, 
+        sender: Token,
+        receiver: address,
         amount: u64
     ) -> (Token, Token) {
         assert(sender.amount >= amount);
-        
+
         let remaining: Token = Token {
             owner: sender.owner,
             amount: sender.amount - amount,
         };
-        
+
         let sent: Token = Token {
             owner: receiver,
             amount: amount,
         };
-        
+
         return (remaining, sent);
     }
 }
@@ -482,21 +482,21 @@ program token.aleo {
 ```leo
 program ownable.aleo {
     mapping owner: u8 => address;
-    
+
     async transition initialize() -> Future {
         return finalize_initialize(self.caller);
     }
-    
+
     async function finalize_initialize(caller: address) {
         let exists: bool = Mapping::contains(owner, 0u8);
         assert(!exists);  // Can only initialize once
         Mapping::set(owner, 0u8, caller);
     }
-    
+
     async transition admin_action() -> Future {
         return finalize_admin_action(self.caller);
     }
-    
+
     async function finalize_admin_action(caller: address) {
         let current_owner: address = Mapping::get(owner, 0u8);
         assert_eq(caller, current_owner);
@@ -606,7 +606,7 @@ transition withdraw(token: Token, amount: u64) -> Token {
     assert(self.caller == token.owner);
     assert_eq(a, b);
     assert_neq(a, b);
-    
+
     return Token {
         owner: token.owner,
         amount: token.amount - amount,
@@ -659,7 +659,7 @@ async function finalize_stake(staker: address, amount: u64) {
     // Mapping operations (public state)
     let current: u64 = Mapping::get_or_use(stakes, staker, 0u64);
     Mapping::set(stakes, staker, current + amount);
-    
+
     let exists: bool = Mapping::contains(stakes, staker);
     Mapping::remove(stakes, staker);  // Delete entry
 }
@@ -680,7 +680,7 @@ program orchestrator.aleo {
         // Call external async transitions
         let (r1, f1): (u64, Future) = other.aleo/action_a(a);
         let (r2, f2): (u64, Future) = other.aleo/action_b(b);
-        
+
         return finalize_both(f1, f2);
     }
 
@@ -708,7 +708,7 @@ transition test_mint() {
     assert_eq(token.amount, 100u64);
 }
 
-@test 
+@test
 transition test_transfer() {
     let sender: Token = Token { owner: aleo1..., amount: 100u64 };
     let (remaining, sent) = transfer(sender, aleo1receiver..., 30u64);

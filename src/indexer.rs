@@ -271,14 +271,30 @@ impl ProjectIndex {
             ("github.com/gin-gonic/gin", "Gin", FrameworkCategory::Web),
             ("github.com/labstack/echo", "Echo", FrameworkCategory::Web),
             ("github.com/gofiber/fiber", "Fiber", FrameworkCategory::Web),
-            ("github.com/gorilla/mux", "Gorilla Mux", FrameworkCategory::Web),
+            (
+                "github.com/gorilla/mux",
+                "Gorilla Mux",
+                FrameworkCategory::Web,
+            ),
             ("github.com/go-chi/chi", "Chi", FrameworkCategory::Web),
             ("github.com/spf13/cobra", "Cobra", FrameworkCategory::Cli),
-            ("github.com/urfave/cli", "urfave/cli", FrameworkCategory::Cli),
+            (
+                "github.com/urfave/cli",
+                "urfave/cli",
+                FrameworkCategory::Cli,
+            ),
             ("gorm.io/gorm", "GORM", FrameworkCategory::Database),
-            ("github.com/jmoiron/sqlx", "sqlx", FrameworkCategory::Database),
+            (
+                "github.com/jmoiron/sqlx",
+                "sqlx",
+                FrameworkCategory::Database,
+            ),
             ("entgo.io/ent", "Ent", FrameworkCategory::Database),
-            ("github.com/stretchr/testify", "Testify", FrameworkCategory::Testing),
+            (
+                "github.com/stretchr/testify",
+                "Testify",
+                FrameworkCategory::Testing,
+            ),
         ];
 
         for (key, name, category) in frameworks_to_detect {

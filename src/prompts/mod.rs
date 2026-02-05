@@ -3,6 +3,8 @@
 mod go;
 mod leo;
 mod rust;
+mod solidity;
+mod typescript;
 
 use crate::prompt_builder::StructuredPrompt;
 use std::collections::HashMap;
@@ -10,6 +12,8 @@ use std::collections::HashMap;
 pub use go::GO_PROMPT;
 pub use leo::LEO_PROMPT;
 pub use rust::RUST_PROMPT;
+pub use solidity::SOLIDITY_PROMPT;
+pub use typescript::TYPESCRIPT_PROMPT;
 
 /// Returns a map of all built-in prompts (raw strings for backward compatibility)
 pub fn builtin_prompts() -> HashMap<&'static str, &'static str> {
@@ -17,6 +21,10 @@ pub fn builtin_prompts() -> HashMap<&'static str, &'static str> {
     prompts.insert("rust", RUST_PROMPT);
     prompts.insert("go", GO_PROMPT);
     prompts.insert("leo", LEO_PROMPT);
+    prompts.insert("typescript", TYPESCRIPT_PROMPT);
+    prompts.insert("ts", TYPESCRIPT_PROMPT);
+    prompts.insert("solidity", SOLIDITY_PROMPT);
+    prompts.insert("sol", SOLIDITY_PROMPT);
     prompts
 }
 
@@ -33,11 +41,13 @@ pub fn get_structured_prompt(language: &str) -> Option<StructuredPrompt> {
         "rust" => Some(rust::structured_prompt()),
         "go" => Some(go::structured_prompt()),
         "leo" => Some(leo::structured_prompt()),
+        "typescript" | "ts" => Some(typescript::structured_prompt()),
+        "solidity" | "sol" => Some(solidity::structured_prompt()),
         _ => None,
     }
 }
 
 /// List all available built-in language names
 pub fn available_languages() -> Vec<&'static str> {
-    vec!["rust", "go", "leo"]
+    vec!["rust", "go", "leo", "typescript", "solidity"]
 }

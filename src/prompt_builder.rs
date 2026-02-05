@@ -34,6 +34,8 @@ pub enum Section {
     Patterns,
     /// Tooling (linting, formatting)
     Tooling,
+    /// Security best practices
+    Security,
 }
 
 impl Section {
@@ -52,6 +54,7 @@ impl Section {
             Section::Documentation,
             Section::Patterns,
             Section::Tooling,
+            Section::Security,
         ]
     }
 
@@ -70,6 +73,7 @@ impl Section {
             Section::Documentation => "documentation",
             Section::Patterns => "patterns",
             Section::Tooling => "tooling",
+            Section::Security => "security",
         }
     }
 
@@ -88,6 +92,7 @@ impl Section {
             "documentation" | "docs" | "doc" => Some(Section::Documentation),
             "patterns" | "pattern" | "examples" => Some(Section::Patterns),
             "tooling" | "tools" | "lint" | "format" => Some(Section::Tooling),
+            "security" | "sec" | "audit" => Some(Section::Security),
             _ => None,
         }
     }
@@ -216,7 +221,13 @@ impl StructuredPrompt {
         }
 
         // Add structure/deps for larger projects
-        if index.languages.values().map(|l| l.file_count).sum::<usize>() > 20 {
+        if index
+            .languages
+            .values()
+            .map(|l| l.file_count)
+            .sum::<usize>()
+            > 20
+        {
             sections.insert(Section::Structure);
             sections.insert(Section::Dependencies);
         }

@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact: promptctl-aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact: promptctl-x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: promptctl-x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact: promptctl-aarch64-unknown-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        run: |
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czvf ../../../${{ matrix.artifact }}.tar.gz promptctl
+          cd ../../..
+          shasum -a 256 ${{ matrix.artifact }}.tar.gz > ${{ matrix.artifact }}.tar.gz.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.tar.gz.sha256
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha256_darwin_arm64: ${{ steps.checksums.outputs.sha256_darwin_arm64 }}
+      sha256_darwin_x64: ${{ steps.checksums.outputs.sha256_darwin_x64 }}
+      sha256_linux_x64: ${{ steps.checksums.outputs.sha256_linux_x64 }}
+      sha256_linux_arm64: ${{ steps.checksums.outputs.sha256_linux_arm64 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect checksums
+        id: checksums
+        run: |
+          echo "sha256_darwin_arm64=$(cat artifacts/promptctl-aarch64-apple-darwin/promptctl-aarch64-apple-darwin.tar.gz.sha256 | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "sha256_darwin_x64=$(cat artifacts/promptctl-x86_64-apple-darwin/promptctl-x86_64-apple-darwin.tar.gz.sha256 | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "sha256_linux_x64=$(cat artifacts/promptctl-x86_64-unknown-linux-gnu/promptctl-x86_64-unknown-linux-gnu.tar.gz.sha256 | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "sha256_linux_arm64=$(cat artifacts/promptctl-aarch64-unknown-linux-gnu/promptctl-aarch64-unknown-linux-gnu.tar.gz.sha256 | awk '{print $1}')" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            artifacts/promptctl-aarch64-apple-darwin/promptctl-aarch64-apple-darwin.tar.gz
+            artifacts/promptctl-aarch64-apple-darwin/promptctl-aarch64-apple-darwin.tar.gz.sha256
+            artifacts/promptctl-x86_64-apple-darwin/promptctl-x86_64-apple-darwin.tar.gz
+            artifacts/promptctl-x86_64-apple-darwin/promptctl-x86_64-apple-darwin.tar.gz.sha256
+            artifacts/promptctl-x86_64-unknown-linux-gnu/promptctl-x86_64-unknown-linux-gnu.tar.gz
+            artifacts/promptctl-x86_64-unknown-linux-gnu/promptctl-x86_64-unknown-linux-gnu.tar.gz.sha256
+            artifacts/promptctl-aarch64-unknown-linux-gnu/promptctl-aarch64-unknown-linux-gnu.tar.gz
+            artifacts/promptctl-aarch64-unknown-linux-gnu/promptctl-aarch64-unknown-linux-gnu.tar.gz.sha256
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Homebrew formula
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          repository: debendraoli/homebrew-promptctl
+          event-type: update-formula
+          client-payload: |
+            {
+              "version": "${{ needs.release.outputs.version }}",
+              "sha256_darwin_arm64": "${{ needs.release.outputs.sha256_darwin_arm64 }}",
+              "sha256_darwin_x64": "${{ needs.release.outputs.sha256_darwin_x64 }}",
+              "sha256_linux_x64": "${{ needs.release.outputs.sha256_linux_x64 }}",
+              "sha256_linux_arm64": "${{ needs.release.outputs.sha256_linux_arm64 }}"
+            }
