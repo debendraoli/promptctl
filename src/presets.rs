@@ -45,6 +45,9 @@ pub struct Preset {
     /// Enable smart filtering
     #[serde(default)]
     pub smart: bool,
+    /// Target AI agent (copilot, claude, cursor, codex, aider)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
 }
 
 impl Preset {
@@ -56,6 +59,7 @@ impl Preset {
             size: PromptSize::Compact,
             sections: Vec::new(),
             smart: false,
+            agent: None,
         }
     }
 
@@ -81,6 +85,12 @@ impl Preset {
 
     pub fn with_description(mut self, desc: &str) -> Self {
         self.description = Some(desc.to_string());
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn with_agent(mut self, agent: &str) -> Self {
+        self.agent = Some(agent.to_string());
         self
     }
 

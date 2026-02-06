@@ -5,6 +5,10 @@ A personal CLI tool for managing coding prompts across projects with project ind
 ## Features
 
 - **Built-in prompts** for Rust (1.93), Go (1.25), Leo (Aleo smart contracts), TypeScript (5.9), and Solidity (0.8.28) with modern, idiomatic guidelines
+- **Agent-specific output** — emit instructions for Copilot, Claude, Cursor, Codex, or Aider in their native format
+- **Hallucination prevention** — auto-appended guardrails that prevent AI agents from inventing APIs or fabricating dependencies
+- **Prompt merging** — extend built-in prompts with project-specific rules (prepend, append, or merge) instead of replacing them
+- **Agent hooks** — native lifecycle hooks for Claude (SessionStart, PreToolUse), Cursor (per-language rules), and Copilot (path-specific instructions)
 - **Project indexing** - Automatically detects languages, frameworks, and project structure
 - **Role selection** - Apply different personas (developer, reviewer, security, etc.)
 - **Tiered sizes** - Minimal (~500 tokens), compact (~1500), or full (~3000) prompts
@@ -198,11 +202,106 @@ promptctl init
 
 This creates a `.promptctl.toml` in the current directory for custom prompts.
 
+### Agent Instructions
+
+Emit instructions directly to the file each AI agent reads:
+
+```bash
+# List supported agents
+promptctl agents
+
+# Emit to agent instruction files
+promptctl emit copilot              # writes .github/copilot-instructions.md
+promptctl emit claude               # writes CLAUDE.md
+promptctl emit cursor               # writes .cursor/rules/promptctl.mdc
+promptctl emit codex                # writes AGENTS.md
+promptctl emit aider                # writes CONVENTIONS.md
+
+# Emit to global location (home dir)
+promptctl emit copilot --global     # writes ~/.github/copilot-instructions.md
+promptctl emit claude --global      # writes ~/.claude/CLAUDE.md
+
+# Preview without writing
+promptctl emit claude --dry-run
+
+# Force overwrite
+promptctl emit copilot --force
+
+# Use with presets and roles
+promptctl emit claude --role senior --size full --smart
+```
+
+### Agent-Formatted Generate
+
+Format output for a specific agent without writing files:
+
+```bash
+# Format for Copilot (adds HTML comment header)
+promptctl generate --agent copilot
+
+# Format for Cursor (adds MDC frontmatter)
+promptctl generate --agent cursor --copy
+
+# Format for Claude and copy
+promptctl generate --agent claude --role reviewer --copy
+```
+
+### Hallucination Prevention
+
+Prompts now include anti-hallucination guardrails by default:
+
+- Never invent APIs, functions, or types that don't exist
+- Never fabricate crate/package names
+- Pin to the language version in project config
+- Language-specific guardrails (Rust, Go, TypeScript, Solidity, Leo)
+
+```bash
+# Disable guardrails if you want raw guidelines only
+promptctl generate --no-guardrails
+promptctl emit copilot --no-guardrails
+```
+
+### Agent Hooks
+
+Install native lifecycle hooks that run inside each agent's own loop:
+
+```bash
+# Claude Code — SessionStart + PreToolUse (Write|Edit) hooks
+promptctl hooks install claude
+
+# Cursor — per-language .mdc rules with glob scoping
+promptctl hooks install cursor
+
+# Copilot — path-specific .instructions.md files
+promptctl hooks install copilot
+
+# Preview what would be generated
+promptctl hooks install claude --dry-run
+
+# List installed agent hooks
+promptctl hooks list
+
+# Remove hooks for an agent
+promptctl hooks remove claude
+```
+
+**What gets generated:**
+
+| Agent | Files | How it works |
+|-------|-------|--------------|
+| Claude | `.claude/hooks/promptctl-*.sh` + `.claude/settings.json` | Injects guidelines on session start; reminds context before file writes |
+| Cursor | `.cursor/rules/promptctl-<lang>.mdc` | Per-language rules applied when editing matching files (e.g. `**/*.rs`) |
+| Copilot | `.github/instructions/promptctl-<lang>.instructions.md` | Path-specific instructions scoped to file types via `applyTo` globs |
+
 ## Configuration
 
 Create a `.promptctl.toml` file to add custom prompts:
 
 ```toml
+# Optional: set a default AI agent for this project
+default_agent = "copilot"  # copilot, claude, cursor, codex, aider
+
+# Replace mode (default) — fully replace the built-in prompt
 [prompts.python]
 name = "Python"
 description = "Python development guidelines"
@@ -215,24 +314,57 @@ content = """
 - Prefer dataclasses for data containers
 """
 
+# Append mode — add project rules AFTER the built-in prompt
+[prompts.rust]
+name = "Rust"
+mode = "append"
+append = """
+## Project-Specific Rules
+- Use workspace dependencies from root Cargo.toml
+- All public APIs must have doc comments
+- Integration tests go in tests/ not src/
+"""
+
+# Prepend mode — add context BEFORE the built-in prompt
 [prompts.typescript]
 name = "TypeScript"
-description = "TypeScript best practices"
-content = """
-# TypeScript Guidelines
+mode = "prepend"
+prepend = """
+## Project Context
+This is a Next.js 15 app with App Router.
+Use server components by default.
+"""
 
-- Use strict mode
-- Prefer interfaces over types for object shapes
-- Use const assertions where applicable
+# Merge mode — both prepend and append around the built-in
+[prompts.go]
+name = "Go"
+mode = "merge"
+prepend = """
+## Our Go Standards
+- All services use our internal pkg/errors package
+"""
+append = """
+## Repo-Specific Patterns
+- Use sqlc for database queries
+- Proto files live in api/proto/
 """
 ```
+
+### Prompt Modes
+
+| Mode | Behavior |
+|------|----------|
+| `replace` | Fully replace the built-in prompt (default, backward-compatible) |
+| `prepend` | Add custom content before the built-in prompt |
+| `append` | Add custom content after the built-in prompt |
+| `merge` | Use both `prepend` and `append` around the built-in prompt |
 
 The tool searches for config files:
 
 1. Current directory and parent directories
 2. Home directory (`~/.promptctl.toml`)
 
-Custom prompts override built-in prompts with the same name.
+Custom prompts override (or extend, with merge modes) built-in prompts with the same name.
 
 ## Built-in Prompts
 
@@ -296,6 +428,40 @@ promptctl generate --preset mywork --copy
 
 AI coding agents can use `promptctl` to fetch language-specific guidelines before generating code. Here are common patterns:
 
+### One-Command Setup Per Agent
+
+```bash
+# Set up Copilot for your project
+promptctl emit copilot --smart
+
+# Set up Claude Code
+promptctl emit claude --role senior --smart
+
+# Set up Cursor
+promptctl emit cursor --size full
+
+# Set up all agents at once
+for agent in copilot claude cursor codex aider; do
+    promptctl emit $agent --smart --force
+done
+```
+
+### Agent Hooks — Deep Integration
+
+```bash
+# Install agent-native lifecycle hooks
+promptctl hooks install claude       # SessionStart + PreToolUse hooks
+promptctl hooks install cursor       # Per-language .mdc rules
+promptctl hooks install copilot      # Path-specific instruction files
+
+# Preview before writing
+promptctl hooks install claude --dry-run
+
+# Manage hooks
+promptctl hooks list
+promptctl hooks remove cursor
+```
+
 ### Fetch Guidelines Before Coding
 
 ```bash
@@ -319,6 +485,10 @@ promptctl generate
 promptctl generate --role senior       # Architecture decisions
 promptctl generate --role security     # Security audit
 promptctl generate --role mentor       # Learning/explaining
+
+# Format for a specific agent
+promptctl generate --agent copilot --copy
+promptctl generate --agent claude --role reviewer --copy
 ```
 
 ### Token-Efficient Prompts for Agents
@@ -351,13 +521,17 @@ promptctl show leo
 # 1. Detect project type
 promptctl scan --json 2>/dev/null || promptctl scan
 
-# 2. Fetch appropriate guidelines
+# 2. Emit instructions for your agent
+promptctl emit copilot --smart
+
+# 3. Install agent hooks for deep integration
+promptctl hooks install claude         # Lifecycle hooks
+promptctl hooks install cursor         # Per-language rules
+
+# 4. Or fetch guidelines for ad-hoc use
 GUIDELINES=$(promptctl generate --size compact)
 
-# 3. Use guidelines in agent prompt
-echo "$GUIDELINES" | head -100  # Preview
-
-# 4. For specific tasks, use targeted sections
+# 5. For specific tasks, use targeted sections
 promptctl generate --sections async,concurrency --role performance
 ```
 
@@ -386,15 +560,29 @@ Before writing code in any supported language, fetch the appropriate guidelines:
 - `promptctl show <language> --role <role>` - Role-specific (developer, senior, reviewer, security, performance)
 - `promptctl generate --size minimal` - Token-efficient guidelines (~500 tokens)
 - `promptctl generate --sections <sections>` - Specific sections (error-handling, testing, async, concurrency, types, memory, security)
+- `promptctl emit <agent>` - Write native instruction files (copilot, claude, cursor, codex, aider)
+- `promptctl hooks install <agent>` - Install agent-native lifecycle hooks (claude, cursor, copilot)
 
 Workflow:
 1. Detect project language: `promptctl scan`
-2. Fetch guidelines before coding: `promptctl show rust` or `promptctl generate`
-3. For security-sensitive code: `promptctl show <lang> --role security`
-4. For code reviews: `promptctl show <lang> --role reviewer`
+2. Install agent hooks: `promptctl hooks install claude` (or cursor/copilot)
+3. Emit agent instructions: `promptctl emit copilot --smart`
+4. Or fetch guidelines before coding: `promptctl show rust` or `promptctl generate`
+5. For security-sensitive code: `promptctl show <lang> --role security`
+6. For code reviews: `promptctl show <lang> --role reviewer`
 
 Always follow the fetched guidelines when generating code.
 ```
+
+## Supported Agents
+
+| Agent | Instruction File | Global File | Native Hooks |
+|-------|-----------------|-------------|----|
+| Copilot | `.github/copilot-instructions.md` | `~/.github/copilot-instructions.md` | `.github/instructions/*.instructions.md` |
+| Claude | `CLAUDE.md` | `~/.claude/CLAUDE.md` | `.claude/hooks/promptctl-*.sh` + settings.json |
+| Cursor | `.cursor/rules/promptctl.mdc` | `~/.cursor/rules/promptctl.mdc` | `.cursor/rules/promptctl-<lang>.mdc` |
+| Codex | `AGENTS.md` | — | — |
+| Aider | `CONVENTIONS.md` | — | — |
 
 ## Token Estimates
 
