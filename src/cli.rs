@@ -90,7 +90,78 @@ pub enum Commands {
         /// Use a saved preset
         #[arg(long)]
         preset: Option<String>,
+
+        /// Target AI agent (copilot, claude, cursor, codex, aider)
+        #[arg(short, long)]
+        agent: Option<String>,
+
+        /// Disable hallucination prevention guardrails
+        #[arg(long)]
+        no_guardrails: bool,
     },
+
+    /// Write instructions directly to an agent's convention file
+    Emit {
+        /// Target agent (copilot, claude, cursor, codex, aider)
+        agent: String,
+
+        /// Role to use (defaults to developer)
+        #[arg(short, long, default_value = "developer")]
+        role: String,
+
+        /// Language to use (auto-detected if not specified)
+        #[arg(short, long)]
+        language: Option<String>,
+
+        /// Path to scan (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Prompt size: minimal, compact, full
+        #[arg(long, default_value = "compact")]
+        size: String,
+
+        /// Sections to include (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        sections: Option<Vec<String>>,
+
+        /// Enable smart filtering based on project analysis
+        #[arg(long)]
+        smart: bool,
+
+        /// Use a saved preset
+        #[arg(long)]
+        preset: Option<String>,
+
+        /// Write to global location (~/) instead of project
+        #[arg(long)]
+        global: bool,
+
+        /// Force overwrite existing file
+        #[arg(short, long)]
+        force: bool,
+
+        /// Preview output without writing
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Suppress output messages
+        #[arg(short, long)]
+        quiet: bool,
+
+        /// Disable hallucination prevention guardrails
+        #[arg(long)]
+        no_guardrails: bool,
+    },
+
+    /// Install, remove, or list agent-native hooks
+    Hooks {
+        #[command(subcommand)]
+        action: HooksAction,
+    },
+
+    /// List supported AI agents and their file conventions
+    Agents,
 
     /// Manage saved presets
     Preset {
@@ -142,6 +213,44 @@ pub enum PresetAction {
 
     /// Delete a preset
     Delete { name: String },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum HooksAction {
+    /// Install agent-native hooks (Claude, Cursor, Copilot)
+    Install {
+        /// Target agent (claude, cursor, copilot)
+        agent: String,
+
+        /// Path to project root (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Force overwrite existing hook files
+        #[arg(short, long)]
+        force: bool,
+
+        /// Preview without writing files
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Remove installed agent hooks
+    Remove {
+        /// Target agent (claude, cursor, copilot)
+        agent: String,
+
+        /// Path to project root (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+
+    /// List installed agent hooks
+    List {
+        /// Path to project root (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
