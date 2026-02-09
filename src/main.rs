@@ -1,25 +1,22 @@
-//! promptctl - A personal CLI tool for managing coding prompts across projects.
+//! promptctl - A CLI tool for managing AI coding agent instructions across projects.
 
 mod agents;
 mod cli;
 mod clipboard;
 mod config;
 mod indexer;
-mod presets;
 mod prompt_builder;
 mod prompts;
 mod roles;
 
 use agents::Agent;
 use clap::Parser;
-use cli::{Cli, Commands, HooksAction, OutputFormat, PresetAction};
+use cli::{Cli, Commands};
 use colored::Colorize;
 use config::{Config, PromptMode};
 use indexer::ProjectIndex;
-use presets::{builtin_presets, Preset, Presets};
-use prompt_builder::{PromptBuilder, PromptSize, Section};
+use prompt_builder::{PromptBuilder, PromptSize};
 use roles::Role;
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -36,683 +33,170 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::load()?;
-
     match cli.command {
-        Commands::List => cmd_list(config.as_ref()),
-        Commands::Show { language, role } => cmd_show(&language, role.as_deref(), config.as_ref()),
-        Commands::Copy { language, role } => cmd_copy(&language, role.as_deref(), config.as_ref()),
-        Commands::Init { force } => cmd_init(force),
-        Commands::Roles => cmd_roles(),
-        Commands::Scan { path } => cmd_scan(path),
-        Commands::Generate {
-            role,
-            language,
-            copy,
-            path,
-            format,
-            size,
-            sections,
-            smart,
-            preset,
-            agent,
-            no_guardrails,
-        } => cmd_generate(GenerateOptions {
-            role,
-            language,
-            copy,
-            path,
-            format,
-            size,
-            sections,
-            smart,
-            preset,
-            agent,
-            no_guardrails,
-        }),
-        Commands::Emit {
+        Commands::Init {
             agent,
             role,
-            language,
             path,
-            size,
-            sections,
-            smart,
-            preset,
-            global,
             force,
             dry_run,
-            quiet,
-            no_guardrails,
-        } => cmd_emit(EmitOptions {
-            agent,
-            role,
-            language,
-            path,
-            size,
-            sections,
-            smart,
-            preset,
             global,
-            force,
-            dry_run,
-            quiet,
-            no_guardrails,
-        }),
-        Commands::Hooks { action } => cmd_hooks(action),
-        Commands::Agents => cmd_agents(),
-        Commands::Preset { action } => cmd_preset(action),
-        Commands::Sections => cmd_sections(),
+        } => cmd_init(&agent, &role, path.as_deref(), force, dry_run, global),
+        Commands::Show { language, role } => cmd_show(&language, role.as_deref()),
+        Commands::List => cmd_list(),
+        Commands::Clean { agent, path } => cmd_clean(&agent, path.as_deref()),
     }
 }
 
-/// Options for the generate command
-struct GenerateOptions {
-    role: String,
-    language: Option<String>,
-    copy: bool,
-    path: Option<String>,
-    format: OutputFormat,
-    size: String,
-    sections: Option<Vec<String>>,
-    smart: bool,
-    preset: Option<String>,
-    agent: Option<String>,
-    no_guardrails: bool,
-}
+// ── init: scan + emit + hooks ────────────────────────────────────────────────
 
-/// Options for the emit command
-struct EmitOptions {
-    agent: String,
-    role: String,
-    language: Option<String>,
-    path: Option<String>,
-    size: String,
-    sections: Option<Vec<String>>,
-    smart: bool,
-    preset: Option<String>,
-    global: bool,
+fn cmd_init(
+    agent_name: &str,
+    role_name: &str,
+    path: Option<&str>,
     force: bool,
     dry_run: bool,
-    quiet: bool,
-    no_guardrails: bool,
-}
-
-/// List all available prompts
-fn cmd_list(config: Option<&Config>) -> Result<(), Box<dyn std::error::Error>> {
-    println!("{}", "Available prompts:".bold());
-    println!();
-
-    // Built-in prompts
-    println!("  {}", "Built-in:".cyan().bold());
-    for lang in prompts::available_languages() {
-        println!("    {} {lang}", "•".green());
-    }
-
-    // Custom prompts from config
-    if let Some(cfg) = config {
-        let custom = cfg.custom_languages();
-        if !custom.is_empty() {
-            println!();
-            println!("  {}", "Custom:".cyan().bold());
-            for lang in custom {
-                if let Some(prompt) = cfg.get_prompt(lang) {
-                    let desc = prompt
-                        .description
-                        .as_deref()
-                        .map(|d| format!(" - {d}"))
-                        .unwrap_or_default();
-                    println!("    {} {}{}", "•".yellow(), lang, desc.dimmed());
-                }
-            }
-        }
-    }
-
-    println!();
-    println!(
-        "{}",
-        "Use 'promptctl show <language>' to view a prompt.".dimmed()
-    );
-    println!(
-        "{}",
-        "Use 'promptctl roles' to see available roles.".dimmed()
-    );
-
-    Ok(())
-}
-
-fn cmd_show(
-    language: &str,
-    role: Option<&str>,
-    config: Option<&Config>,
+    global: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let prompt = get_prompt(language, config)?;
-
-    if let Some(role_name) = role {
-        let role = Role::from_str(role_name).ok_or_else(|| {
-            format!("unknown role: '{role_name}'. Use 'promptctl roles' to see available roles.")
-        })?;
-        println!("{}", role.prompt_prefix());
-    }
-
-    println!("{prompt}");
-    Ok(())
-}
-
-fn cmd_copy(
-    language: &str,
-    role: Option<&str>,
-    config: Option<&Config>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let prompt = get_prompt(language, config)?;
-
-    let full_prompt = if let Some(role_name) = role {
-        let role = Role::from_str(role_name).ok_or_else(|| {
-            format!("unknown role: '{role_name}'. Use 'promptctl roles' to see available roles.")
-        })?;
-        format!("{}\n{}", role.prompt_prefix(), prompt)
-    } else {
-        prompt.to_string()
-    };
-
-    clipboard::copy_to_clipboard(&full_prompt)?;
-    println!(
-        "{} Copied {} prompt to clipboard!",
-        "✓".green().bold(),
-        language.cyan()
-    );
-    Ok(())
-}
-
-/// Initialize a config file
-fn cmd_init(force: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let cwd = std::env::current_dir()?;
-    let path = Config::init(&cwd, force)?;
-    println!(
-        "{} Created config file: {}",
-        "✓".green().bold(),
-        path.display()
-    );
-    println!();
-    println!(
-        "{}",
-        "Edit this file to add custom prompts for your project.".dimmed()
-    );
-    Ok(())
-}
-
-fn cmd_roles() -> Result<(), Box<dyn std::error::Error>> {
-    println!("{}", "Available roles:".bold());
-    println!();
-
-    for role in Role::all() {
-        println!(
-            "  {} {}",
-            role.name().cyan().bold(),
-            format!("- {}", role.description()).dimmed()
-        );
-    }
-
-    println!();
-    println!(
-        "{}",
-        "Use 'promptctl show <language> --role <role>' to apply a role.".dimmed()
-    );
-    println!(
-        "{}",
-        "Use 'promptctl generate --role <role>' for project-aware prompts.".dimmed()
-    );
-
-    Ok(())
-}
-
-fn cmd_scan(path: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let scan_path = path
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-
-    println!("{} Scanning {}...", "→".blue().bold(), scan_path.display());
-    println!();
-
-    let index = ProjectIndex::scan(&scan_path);
-
-    if !index.languages.is_empty() {
-        println!("{}", "Languages detected:".bold());
-        let mut langs: Vec<_> = index.languages.values().collect();
-        langs.sort_by(|a, b| b.file_count.cmp(&a.file_count));
-
-        for lang in langs {
-            let version = lang
-                .version
-                .as_ref()
-                .map(|v| format!(" ({})", v))
-                .unwrap_or_default();
-            println!(
-                "  {} {}{} - {} files",
-                "•".green(),
-                lang.name.cyan(),
-                version.dimmed(),
-                lang.file_count
-            );
-        }
-        println!();
-    }
-
-    if !index.frameworks.is_empty() {
-        println!("{}", "Frameworks/Libraries:".bold());
-        for fw in &index.frameworks {
-            println!("  {} {} ({:?})", "•".yellow(), fw.name, fw.category);
-        }
-        println!();
-    }
-
-    println!("{}", "Project structure:".bold());
-    let structure = &index.structure;
-    if structure.has_src {
-        println!("  {} Source directory", "✓".green());
-    }
-    if structure.has_tests {
-        println!("  {} Test directory", "✓".green());
-    }
-    if structure.has_docs {
-        println!("  {} Documentation", "✓".green());
-    }
-    if structure.has_ci {
-        println!("  {} CI/CD configuration", "✓".green());
-    }
-    println!();
-
-    if let Some(primary) = index.primary_language() {
-        println!(
-            "{} Primary language: {}",
-            "→".blue().bold(),
-            primary.name.cyan().bold()
-        );
-        println!(
-            "{}",
-            format!("Use 'promptctl generate' to create a tailored prompt.").dimmed()
-        );
-    }
-
-    Ok(())
-}
-
-fn cmd_generate(opts: GenerateOptions) -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::load()?;
-
-    let preset = if let Some(ref preset_name) = opts.preset {
-        let presets = Presets::load()?;
-        let builtin = builtin_presets();
-
-        presets
-            .get(preset_name)
-            .cloned()
-            .or_else(|| builtin.get(preset_name).cloned())
-            .ok_or_else(|| format!("preset '{preset_name}' not found"))?
-    } else {
-        Preset::default()
-    };
-
-    // Resolve agent: CLI flag > preset > config default > None
-    let agent = opts
-        .agent
-        .as_deref()
-        .or(preset.agent.as_deref())
-        .or(config.as_ref().and_then(|c| c.default_agent.as_deref()))
-        .and_then(Agent::from_str);
-
-    // Merge preset with CLI options (CLI takes precedence)
-    let role_name = if opts.preset.is_some() && opts.role == "developer" {
-        preset.role.as_deref().unwrap_or(&opts.role)
-    } else {
-        &opts.role
-    };
-
-    let role = Role::from_str(role_name).ok_or_else(|| {
-        format!("unknown role: '{role_name}'. Use 'promptctl roles' to see available roles.")
-    })?;
-
-    let scan_path = opts
-        .path
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-
-    let index = ProjectIndex::scan(&scan_path);
-
-    let lang = if let Some(ref l) = opts.language {
-        l.clone()
-    } else if let Some(ref l) = preset.language {
-        l.clone()
-    } else if let Some(primary) = index.primary_language() {
-        primary.name.clone()
-    } else {
-        return Err("Could not detect project language. Use --language to specify.".into());
-    };
-
-    let size_str = if opts.preset.is_some() && opts.size == "compact" {
-        preset.size
-    } else {
-        PromptSize::from_str(&opts.size).unwrap_or(PromptSize::Compact)
-    };
-
-    let sections: Option<HashSet<Section>> = if let Some(ref sec_list) = opts.sections {
-        Some(sec_list.iter().filter_map(|s| Section::from_str(s)).collect())
-    } else {
-        preset.parsed_sections()
-    };
-
-    // Determine smart filtering
-    let smart = opts.smart || preset.smart;
-
-    // Build the prompt
-    let mut full_prompt = String::new();
-
-    // Add role prefix
-    full_prompt.push_str(role.prompt_prefix());
-
-    // Add project context
-    let context = index.to_context_string();
-    if !context.is_empty() {
-        full_prompt.push_str("## Project Context\n\n");
-        full_prompt.push_str(&context);
-        full_prompt.push_str("\n\n");
-    }
-
-    // Get structured prompt if available, otherwise fall back to raw
-    let lang_prompt = if let Some(structured) = prompts::get_structured_prompt(&lang) {
-        let builder = PromptBuilder::new()
-            .size(size_str)
-            .smart(smart);
-
-        let builder = if let Some(sec) = sections {
-            builder.sections(sec)
-        } else {
-            builder
-        };
-
-        let built = format!("# {} Development Guidelines\n\n{}",
-            lang.to_uppercase(),
-            builder.build(&structured, Some(&index)));
-
-        // Apply custom merge (prepend/append) if configured
-        apply_custom_merge(&lang, config.as_ref(), &built)
-    } else {
-        get_prompt(&lang, config.as_ref())?
-    };
-
-    full_prompt.push_str(&lang_prompt);
-
-    // Add hallucination prevention guardrails
-    if !opts.no_guardrails {
-        full_prompt.push_str("\n\n");
-        full_prompt.push_str(&agents::hallucination_guardrails(&lang));
-    }
-
-    // Apply agent formatting
-    let full_prompt = if let Some(ref ag) = agent {
-        ag.format_prompt(&full_prompt, &lang)
-    } else {
-        full_prompt
-    };
-
-    // Estimate tokens
-    let token_estimate = full_prompt.len() / 4;
-
-    // Strip markdown if plain format
-    let output = match opts.format {
-        OutputFormat::Markdown => full_prompt.clone(),
-        OutputFormat::Plain => strip_markdown(&full_prompt),
-    };
-
-    if opts.copy {
-        clipboard::copy_to_clipboard(&output)?;
-        let agent_info = agent
-            .as_ref()
-            .map(|a| format!(" ({})", a.display_name()))
-            .unwrap_or_default();
-        println!(
-            "{} Copied {} prompt with {} role to clipboard!{}",
-            "✓".green().bold(),
-            lang.cyan(),
-            role.name().yellow(),
-            agent_info.dimmed()
-        );
-        println!();
-        println!("{}", format!("~{} tokens", token_estimate).dimmed());
-        println!("{}", "Project context included:".dimmed());
-        for line in context.lines() {
-            println!("  {}", line.dimmed());
-        }
-    } else {
-        println!("{output}");
-    }
-
-    Ok(())
-}
-
-/// Emit instructions to an agent's convention file
-fn cmd_emit(opts: EmitOptions) -> Result<(), Box<dyn std::error::Error>> {
-    let agent = Agent::from_str(&opts.agent).ok_or_else(|| {
+    let agent = Agent::from_str(agent_name).ok_or_else(|| {
         format!(
-            "unknown agent: '{}'. Use 'promptctl agents' to see supported agents.",
-            opts.agent
+            "unknown agent: '{agent_name}'. Supported: {}",
+            Agent::all()
+                .iter()
+                .map(Agent::name)
+                .collect::<Vec<_>>()
+                .join(", ")
         )
     })?;
 
     if agent == Agent::Raw {
-        return Err("cannot emit to 'raw' agent — use 'generate' instead.".into());
+        return Err("cannot init for 'raw' agent — pick a real agent.".into());
     }
 
-    // Generate the prompt content using the same logic as cmd_generate
-    let config = Config::load()?;
-
-    let preset = if let Some(ref preset_name) = opts.preset {
-        let presets = Presets::load()?;
-        let builtin = builtin_presets();
-        presets
-            .get(preset_name)
-            .cloned()
-            .or_else(|| builtin.get(preset_name).cloned())
-            .ok_or_else(|| format!("preset '{preset_name}' not found"))?
-    } else {
-        Preset::default()
-    };
-
-    let role_name = if opts.preset.is_some() && opts.role == "developer" {
-        preset.role.as_deref().unwrap_or(&opts.role).to_string()
-    } else {
-        opts.role.clone()
-    };
-
-    let role = Role::from_str(&role_name).ok_or_else(|| {
-        format!("unknown role: '{role_name}'. Use 'promptctl roles' to see available roles.")
+    let role = Role::from_str(role_name).ok_or_else(|| {
+        format!(
+            "unknown role: '{role_name}'. Available: {}",
+            Role::all()
+                .iter()
+                .map(Role::name)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     })?;
 
-    let scan_path = opts
-        .path
-        .as_ref()
+    let scan_path = path
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
+    // Step 1: Scan
     let index = ProjectIndex::scan(&scan_path);
+    let config = Config::load()?;
 
-    let lang = if let Some(ref l) = opts.language {
-        l.clone()
-    } else if let Some(ref l) = preset.language {
-        l.clone()
-    } else if let Some(primary) = index.primary_language() {
-        primary.name.clone()
-    } else {
-        return Err("Could not detect project language. Use --language to specify.".into());
-    };
+    let languages: Vec<String> = index.languages.keys().map(|l| l.to_lowercase()).collect();
 
-    let size_str = if opts.preset.is_some() && opts.size == "compact" {
-        preset.size
-    } else {
-        PromptSize::from_str(&opts.size).unwrap_or(PromptSize::Compact)
-    };
-
-    let sections: Option<HashSet<Section>> = if let Some(ref sec_list) = opts.sections {
-        Some(sec_list.iter().filter_map(|s| Section::from_str(s)).collect())
-    } else {
-        preset.parsed_sections()
-    };
-
-    let smart = opts.smart || preset.smart;
-
-    // Build prompt content
-    let mut content = String::new();
-    content.push_str(role.prompt_prefix());
-
-    let context = index.to_context_string();
-    if !context.is_empty() {
-        content.push_str("## Project Context\n\n");
-        content.push_str(&context);
-        content.push_str("\n\n");
-    }
-
-    let lang_prompt = if let Some(structured) = prompts::get_structured_prompt(&lang) {
-        let builder = PromptBuilder::new().size(size_str).smart(smart);
-        let builder = if let Some(sec) = sections {
-            builder.sections(sec)
-        } else {
-            builder
-        };
-        let built = format!(
-            "# {} Development Guidelines\n\n{}",
-            lang.to_uppercase(),
-            builder.build(&structured, Some(&index))
+    if !dry_run {
+        println!(
+            "{} Scanning {}...",
+            "→".blue().bold(),
+            scan_path.display()
         );
-
-        // Apply custom merge (prepend/append) if configured
-        apply_custom_merge(&lang, config.as_ref(), &built)
-    } else {
-        get_prompt(&lang, config.as_ref())?
-    };
-    content.push_str(&lang_prompt);
-
-    // Add hallucination prevention guardrails
-    if !opts.no_guardrails {
-        content.push_str("\n\n");
-        content.push_str(&agents::hallucination_guardrails(&lang));
+        if !languages.is_empty() {
+            let lang_display: Vec<String> = {
+                let mut langs: Vec<_> = index.languages.values().collect();
+                langs.sort_by(|a, b| b.file_count.cmp(&a.file_count));
+                langs
+                    .iter()
+                    .map(|l| {
+                        if let Some(ref v) = l.version {
+                            format!("{} {v}", l.name)
+                        } else {
+                            l.name.clone()
+                        }
+                    })
+                    .collect()
+            };
+            println!(
+                "  {} Detected: {}",
+                "✓".green(),
+                lang_display.join(", ").cyan()
+            );
+        }
+        if !index.frameworks.is_empty() {
+            let fw: Vec<_> = index.frameworks.iter().map(|f| f.name.as_str()).collect();
+            println!("  {} Frameworks: {}", "✓".green(), fw.join(", ").dimmed());
+        }
+        println!();
     }
 
-    // Apply agent-specific formatting
-    let formatted = agent.format_prompt(&content, &lang);
+    // Determine primary language for the main instruction file
+    let primary_lang = index
+        .primary_language()
+        .map(|l| l.name.clone())
+        .unwrap_or_default();
 
-    if opts.dry_run {
-        if !opts.quiet {
-            let path = agent
-                .resolve_path(&scan_path, opts.global)
-                .unwrap_or_default();
-            println!(
-                "{} Dry run — would write to: {}",
-                "→".blue().bold(),
-                path.display()
-            );
-            println!();
+    // Step 2: Build prompt content for the main agent instruction file
+    let content = build_agent_prompt(&primary_lang, &role, &index, config.as_ref())?;
+    let formatted = agent.format_prompt(&content, &primary_lang);
+
+    if dry_run {
+        let instr_path = agent
+            .resolve_path(&scan_path, global)
+            .unwrap_or_default();
+        println!(
+            "{} Dry run — would write to:",
+            "→".blue().bold()
+        );
+        println!("  {} {}", "•".green(), instr_path.display());
+
+        // Show hook files that would be created
+        if agents::supports_hooks(agent) {
+            let hook_files = preview_hook_files(agent, &languages, &scan_path);
+            for f in &hook_files {
+                println!("  {} {}", "•".green(), f);
+            }
         }
+
+        println!();
         println!("{formatted}");
         return Ok(());
     }
 
-    let path = agent.emit(&formatted, &scan_path, opts.global, opts.force)?;
+    // Write the main instruction file
+    let instr_path = agent.emit(&formatted, &scan_path, global, force)?;
+    let token_estimate = formatted.len() / 4;
+    println!(
+        "{} Wrote {} instructions to {}",
+        "✓".green().bold(),
+        agent.display_name().cyan(),
+        instr_path.display()
+    );
+    println!("{}", format!("  ~{token_estimate} tokens").dimmed());
 
-    if !opts.quiet {
-        let token_estimate = formatted.len() / 4;
-        println!(
-            "{} Wrote {} instructions to {}",
-            "✓".green().bold(),
-            agent.display_name().cyan(),
-            path.display()
-        );
-        println!("{}", format!("~{} tokens", token_estimate).dimmed());
-    }
+    // Step 3: Install hooks (if agent supports them)
+    if agents::supports_hooks(agent) {
+        // Pre-build skillsets for each detected language
+        let mut skillsets = std::collections::HashMap::new();
+        for lang in &languages {
+            if let Ok(skillset) = build_skillset(lang, config.as_ref()) {
+                skillsets.insert(lang.clone(), skillset);
+            }
+        }
 
-    Ok(())
-}
-
-/// Install, remove, or list agent-native hooks
-fn cmd_hooks(action: HooksAction) -> Result<(), Box<dyn std::error::Error>> {
-    match action {
-        HooksAction::Install {
+        let files = agents::install_agent_hooks(
+            &scan_path,
             agent,
-            path,
+            &languages,
+            role_name,
+            &skillsets,
             force,
-            dry_run,
-        } => {
-            let ag = Agent::from_str(&agent).ok_or_else(|| {
-                format!(
-                    "unknown agent: '{}'. Use 'promptctl agents' to see supported agents.",
-                    agent
-                )
-            })?;
+        )?;
 
-            if !agents::supports_hooks(ag) {
-                return Err(format!(
-                    "agent '{}' has no native hook system. Use 'promptctl emit {}' instead.",
-                    agent, agent
-                )
-                .into());
-            }
-
-            let scan_path = path
-                .as_ref()
-                .map(PathBuf::from)
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-
-            // Detect languages for cursor/copilot per-lang hooks
-            let index = ProjectIndex::scan(&scan_path);
-            let languages: Vec<String> = index
-                .languages
-                .keys()
-                .map(|l| l.to_lowercase())
-                .collect();
-
-            if dry_run {
-                println!(
-                    "{} Dry run — would install {} hooks in {}",
-                    "→".blue().bold(),
-                    ag.display_name().cyan(),
-                    scan_path.display()
-                );
-                println!();
-                match ag {
-                    Agent::Claude => {
-                        println!("  {} .claude/hooks/promptctl-session-start.sh", "•".green());
-                        println!("  {} .claude/hooks/promptctl-pre-write.sh", "•".green());
-                        println!("  {} .claude/settings.json (merged)", "•".green());
-                    }
-                    Agent::Cursor => {
-                        for lang in &languages {
-                            if agents::supports_hooks(Agent::Cursor) {
-                                println!(
-                                    "  {} .cursor/rules/promptctl-{lang}.mdc",
-                                    "•".green()
-                                );
-                            }
-                        }
-                    }
-                    Agent::Copilot => {
-                        for lang in &languages {
-                            println!(
-                                "  {} .github/instructions/promptctl-{lang}.instructions.md",
-                                "•".green()
-                            );
-                        }
-                    }
-                    _ => {}
-                }
-                return Ok(());
-            }
-
-            let files = agents::install_agent_hooks(&scan_path, ag, &languages, force)?;
-
+        if !files.is_empty() {
+            println!();
             println!(
-                "{} Installed {} agent hooks:",
+                "{} Installed {} hooks:",
                 "✓".green().bold(),
-                ag.display_name().cyan()
+                agent.display_name().cyan()
             );
             for f in &files {
                 println!(
@@ -722,276 +206,274 @@ fn cmd_hooks(action: HooksAction) -> Result<(), Box<dyn std::error::Error>> {
                     format!("— {}", f.description).dimmed()
                 );
             }
-
-            println!();
-            match ag {
-                Agent::Claude => {
-                    println!(
-                        "{}",
-                        "Claude Code will load promptctl guidelines on session start".dimmed()
-                    );
-                    println!(
-                        "{}",
-                        "and validate language context before file writes.".dimmed()
-                    );
-                }
-                Agent::Cursor => {
-                    println!(
-                        "{}",
-                        "Cursor will apply per-language rules when editing matching files."
-                            .dimmed()
-                    );
-                }
-                Agent::Copilot => {
-                    println!(
-                        "{}",
-                        "Copilot will apply path-specific instructions when editing matching files."
-                            .dimmed()
-                    );
-                }
-                _ => {}
-            }
-        }
-
-        HooksAction::Remove { agent, path } => {
-            let ag = Agent::from_str(&agent).ok_or_else(|| {
-                format!("unknown agent: '{}'", agent)
-            })?;
-
-            let scan_path = path
-                .as_ref()
-                .map(PathBuf::from)
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-
-            let removed = agents::remove_agent_hooks(&scan_path, ag)?;
-
-            if removed.is_empty() {
-                println!("  {}", "No promptctl hooks found for this agent.".dimmed());
-            } else {
-                println!(
-                    "{} Removed {} hook files:",
-                    "✓".green().bold(),
-                    ag.display_name().cyan()
-                );
-                for p in &removed {
-                    println!("  {} {}", "✗".red(), p.display());
-                }
-            }
-        }
-
-        HooksAction::List { path } => {
-            let scan_path = path
-                .as_ref()
-                .map(PathBuf::from)
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-
-            let hooks = agents::list_agent_hooks(&scan_path);
-
-            if hooks.is_empty() {
-                println!("{}", "No agent hooks installed.".dimmed());
-                println!();
-                println!(
-                    "{}",
-                    "Use 'promptctl hooks install <agent>' to install hooks.".dimmed()
-                );
-                println!(
-                    "{}",
-                    "Supported: claude, cursor, copilot".dimmed()
-                );
-            } else {
-                println!("{}", "Installed agent hooks:".bold());
-                println!();
-                for (agent, files) in &hooks {
-                    println!(
-                        "  {} {} ({} file{})",
-                        "✓".green(),
-                        agent.display_name().cyan().bold(),
-                        files.len(),
-                        if files.len() == 1 { "" } else { "s" }
-                    );
-                    for f in files {
-                        println!("    {}", f.display().to_string().dimmed());
-                    }
-                }
-            }
         }
     }
 
-    Ok(())
-}
-
-/// List supported agents
-fn cmd_agents() -> Result<(), Box<dyn std::error::Error>> {
-    println!("{}", "Supported AI agents:".bold());
-    println!();
-
-    for agent in Agent::all() {
+    // Init .promptctl.toml if it doesn't exist
+    let toml_path = scan_path.join(".promptctl.toml");
+    if !toml_path.exists() && !global {
+        Config::init(&scan_path, false).ok();
+        println!();
         println!(
-            "  {} {} {}",
-            "•".green(),
-            agent.name().cyan().bold(),
-            format!("- {}", agent.description()).dimmed()
+            "{} Created {} for custom prompts",
+            "✓".green().bold(),
+            ".promptctl.toml".dimmed()
         );
     }
 
     println!();
-    println!("{}", "Usage:".bold());
     println!(
-        "  {}",
-        "promptctl generate --agent copilot    # Format for Copilot".dimmed()
-    );
-    println!(
-        "  {}",
-        "promptctl emit claude                  # Write CLAUDE.md".dimmed()
-    );
-    println!(
-        "  {}",
-        "promptctl emit copilot --global        # Write ~/.github/copilot-instructions.md"
-            .dimmed()
-    );
-    println!(
-        "  {}",
-        "promptctl hooks install claude         # Install Claude session/write hooks".dimmed()
+        "{}",
+        format!(
+            "Done! {} will now use promptctl guidelines.",
+            agent.display_name()
+        )
+        .green()
+        .bold()
     );
 
     Ok(())
 }
 
-/// Handle preset commands
-fn cmd_preset(action: PresetAction) -> Result<(), Box<dyn std::error::Error>> {
-    match action {
-        PresetAction::List => {
-            let presets = Presets::load()?;
-            let builtin = builtin_presets();
+/// Build the full prompt content for an agent instruction file.
+///
+/// The base instruction file contains ONLY:
+///   1. Role prefix (persona)
+///   2. Project context (detected languages, frameworks, structure)
+///   3. Hallucination guardrails (generic, not language-specific)
+///
+/// Language-specific skillsets are delivered via agent hooks (Cursor .mdc rules,
+/// Copilot .instructions.md, Claude session hooks) — NOT baked into the base file.
+fn build_agent_prompt(
+    _language: &str,
+    role: &Role,
+    index: &ProjectIndex,
+    _config: Option<&Config>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let mut content = String::new();
 
-            println!("{}", "Built-in presets:".bold());
-            for (name, preset) in &builtin {
-                let desc = preset.description.as_deref().unwrap_or("");
-                println!("  {} {} {}", "•".green(), name.cyan(), desc.dimmed());
+    // 1. Role prefix
+    content.push_str(role.prompt_prefix());
+
+    // 2. Project context
+    let context = index.to_context_string();
+    if !context.is_empty() {
+        content.push_str("## Project Context\n\n");
+        content.push_str(&context);
+        content.push_str("\n\n");
+    }
+
+    // 3. Note about skillsets (so the AI knows they exist)
+    let detected: Vec<String> = index.languages.keys().map(|l| l.to_lowercase()).collect();
+    if !detected.is_empty() {
+        content.push_str("## Language Skillsets\n\n");
+        content.push_str(
+            "This project uses language-specific coding guidelines loaded as separate skillsets.\n",
+        );
+        content.push_str(
+            "Refer to each language's skillset for idiomatic patterns, error handling, \
+             type system usage, testing, and tooling conventions.\n\n",
+        );
+        content.push_str("Detected languages: ");
+        content.push_str(&detected.join(", "));
+        content.push_str("\n\n");
+    }
+
+    // 4. Generic hallucination guardrails (no language-specific ones — those live in skillsets)
+    content.push_str(GENERIC_GUARDRAILS);
+
+    Ok(content)
+}
+
+/// Generic guardrails appended to every base instruction file.
+/// Language-specific guardrails are part of each language's skillset.
+const GENERIC_GUARDRAILS: &str = r#"## Hallucination Prevention
+
+- **Never invent APIs, functions, or types** that do not exist in the language or library version.
+- **Never fabricate package or module names**. Only reference dependencies that are documented and published.
+- **If you are unsure whether a feature exists**, say so explicitly rather than guessing.
+- **Pin to the language version** declared in project config (Cargo.toml, go.mod, package.json, etc.).
+- **Do not hallucinate CLI flags, compiler options, or toolchain features**.
+- **Verify struct fields, enum variants, and trait/interface methods** before referencing them.
+- **When suggesting dependencies**, only suggest packages you are confident exist and are maintained.
+- **Prefer standard library solutions** over third-party when the stdlib provides equivalent functionality.
+- **Quote error messages exactly** when referencing compiler or runtime errors.
+"#;
+
+// ── show ─────────────────────────────────────────────────────────────────────
+
+fn cmd_show(language: &str, role: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::load()?;
+
+    // Build the skillset: structured prompt + custom merge + language guardrails
+    let prompt = build_skillset(language, config.as_ref())?;
+
+    if let Some(role_name) = role {
+        let role = Role::from_str(role_name).ok_or_else(|| {
+            format!(
+                "unknown role: '{role_name}'. Available: {}",
+                Role::all()
+                    .iter()
+                    .map(Role::name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })?;
+        println!("{}", role.prompt_prefix());
+    }
+
+    println!("{prompt}");
+    Ok(())
+}
+
+// ── list ─────────────────────────────────────────────────────────────────────
+
+fn cmd_list() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::load()?;
+
+    // Languages
+    println!("{}", "Languages:".bold());
+    for lang in prompts::available_languages() {
+        println!("  {} {lang}", "•".green());
+    }
+    if let Some(ref cfg) = config {
+        for lang in cfg.custom_languages() {
+            if let Some(prompt) = cfg.get_prompt(lang) {
+                let desc = prompt
+                    .description
+                    .as_deref()
+                    .map(|d| format!(" - {d}"))
+                    .unwrap_or_default();
+                println!("  {} {}{}", "•".yellow(), lang, desc.dimmed());
             }
-
-            if !presets.presets.is_empty() {
-                println!();
-                println!("{}", "Custom presets:".bold());
-                for (name, preset) in &presets.presets {
-                    let desc = preset.description.as_deref().unwrap_or("");
-                    println!("  {} {} {}", "•".yellow(), name.cyan(), desc.dimmed());
-                }
-            }
-
-            println!();
-            println!("{}", "Use 'promptctl generate --preset <name>' to use a preset.".dimmed());
         }
+    }
 
-        PresetAction::Show { name } => {
-            let presets = Presets::load()?;
-            let builtin = builtin_presets();
+    // Agents
+    println!();
+    println!("{}", "Agents:".bold());
+    for agent in Agent::all() {
+        println!(
+            "  {} {} {}",
+            "•".green(),
+            agent.name().cyan(),
+            format!("→ {}", agent.instruction_file()).dimmed()
+        );
+    }
 
-            let preset = presets
-                .get(&name)
-                .or_else(|| builtin.get(&name))
-                .ok_or_else(|| format!("preset '{name}' not found"))?;
+    // Roles
+    println!();
+    println!("{}", "Roles:".bold());
+    for role in Role::all() {
+        println!(
+            "  {} {} {}",
+            "•".green(),
+            role.name().cyan(),
+            format!("- {}", role.description()).dimmed()
+        );
+    }
 
-            println!("{} {}", "Preset:".bold(), name.cyan());
-            if let Some(ref desc) = preset.description {
-                println!("{} {}", "Description:".bold(), desc);
-            }
-            if let Some(ref role) = preset.role {
-                println!("{} {}", "Role:".bold(), role);
-            }
-            println!("{} {}", "Size:".bold(), preset.size.name());
-            if !preset.sections.is_empty() {
-                println!("{} {}", "Sections:".bold(), preset.sections.join(", "));
-            }
-            println!("{} {}", "Smart:".bold(), preset.smart);
+    println!();
+    println!(
+        "{}",
+        "Use 'promptctl init <agent>' to set up your project.".dimmed()
+    );
+
+    Ok(())
+}
+
+// ── clean ────────────────────────────────────────────────────────────────────
+
+fn cmd_clean(agent_name: &str, path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let agent = Agent::from_str(agent_name)
+        .ok_or_else(|| format!("unknown agent: '{agent_name}'"))?;
+
+    let scan_path = path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+    let mut removed = Vec::new();
+
+    // Remove main instruction file
+    if let Some(instr_path) = agent.resolve_path(&scan_path, false) {
+        if instr_path.exists() {
+            std::fs::remove_file(&instr_path)?;
+            removed.push(instr_path);
         }
+    }
 
-        PresetAction::Save {
-            name,
-            description,
-            role,
-            size,
-            sections,
-            smart,
-            force,
-        } => {
-            let mut presets = Presets::load()?;
+    // Remove hooks
+    if agents::supports_hooks(agent) {
+        let hook_removed = agents::remove_agent_hooks(&scan_path, agent)?;
+        removed.extend(hook_removed);
+    }
 
-            let mut preset = Preset::new();
-            if let Some(desc) = description {
-                preset = preset.with_description(&desc);
-            }
-            if let Some(r) = role {
-                preset = preset.with_role(&r);
-            }
-            if let Some(s) = size {
-                preset = preset.with_size(PromptSize::from_str(&s).unwrap_or(PromptSize::Compact));
-            }
-            if let Some(sec) = sections {
-                preset = preset.with_sections(sec);
-            }
-            preset = preset.with_smart(smart);
-
-            presets.set(name.clone(), preset, force)?;
-            let path = presets.save()?;
-
-            println!(
-                "{} Saved preset '{}' to {}",
-                "✓".green().bold(),
-                name.cyan(),
-                path.display()
-            );
-        }
-
-        PresetAction::Delete { name } => {
-            let mut presets = Presets::load()?;
-            presets.remove(&name)?;
-            presets.save()?;
-            println!("{} Deleted preset '{}'", "✓".green().bold(), name.cyan());
+    if removed.is_empty() {
+        println!(
+            "{}",
+            format!("No promptctl files found for {}.", agent.display_name()).dimmed()
+        );
+    } else {
+        println!(
+            "{} Removed {} file{}:",
+            "✓".green().bold(),
+            removed.len(),
+            if removed.len() == 1 { "" } else { "s" }
+        );
+        for p in &removed {
+            println!("  {} {}", "✗".red(), p.display());
         }
     }
 
     Ok(())
 }
 
-/// List available sections
-fn cmd_sections() -> Result<(), Box<dyn std::error::Error>> {
-    println!("{}", "Available sections:".bold());
-    println!();
+// ── helpers ──────────────────────────────────────────────────────────────────
 
-    for section in Section::all() {
-        println!("  {} {}", "•".green(), section.name().cyan());
-    }
-
-    println!();
-    println!("{}", "Size tiers include:".bold());
-    println!("  {} {}", "minimal".yellow(), "- version, style, error-handling".dimmed());
-    println!("  {} {}", "compact".yellow(), "- minimal + types, testing, tooling".dimmed());
-    println!("  {} {}", "full".yellow(), "- all sections".dimmed());
-
-    println!();
-    println!("{}", "Use 'promptctl generate --sections error-handling,testing' to select specific sections.".dimmed());
-
-    Ok(())
-}
-
-/// Strip basic markdown formatting for plain text output
-fn strip_markdown(text: &str) -> String {
-    text.lines()
-        .map(|line| {
-            let trimmed = line.trim_start_matches('#').trim();
-            if trimmed.is_empty() && line.starts_with('#') {
-                String::new()
-            } else {
-                trimmed.to_string()
+/// Preview hook file paths for dry-run output.
+fn preview_hook_files(agent: Agent, languages: &[String], project_root: &std::path::Path) -> Vec<String> {
+    let mut files = Vec::new();
+    match agent {
+        Agent::Claude => {
+            files.push(format!(
+                "{}",
+                project_root.join(".claude/hooks/promptctl-session-start.sh").display()
+            ));
+            files.push(format!(
+                "{}",
+                project_root.join(".claude/hooks/promptctl-pre-write.sh").display()
+            ));
+            files.push(format!(
+                "{}",
+                project_root.join(".claude/settings.json").display()
+            ));
+        }
+        Agent::Cursor => {
+            for lang in languages {
+                files.push(format!(
+                    "{}",
+                    project_root
+                        .join(format!(".cursor/rules/promptctl-{lang}.mdc"))
+                        .display()
+                ));
             }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+        }
+        Agent::Copilot => {
+            for lang in languages {
+                files.push(format!(
+                    "{}",
+                    project_root
+                        .join(format!(".github/instructions/promptctl-{lang}.instructions.md"))
+                        .display()
+                ));
+            }
+        }
+        _ => {}
+    }
+    files
 }
 
 /// Apply custom prepend/append merge from config around a built-in prompt.
-/// If no custom config exists or mode is Replace, returns the built-in unchanged.
 fn apply_custom_merge(language: &str, config: Option<&Config>, builtin: &str) -> String {
     let lang_lower = language.to_lowercase();
     let Some(cfg) = config else {
@@ -1002,10 +484,7 @@ fn apply_custom_merge(language: &str, config: Option<&Config>, builtin: &str) ->
     };
 
     match custom.mode {
-        PromptMode::Replace => {
-            // In structured prompt path, Replace means use custom entirely
-            custom.content.clone()
-        }
+        PromptMode::Replace => custom.content.clone(),
         PromptMode::Prepend => {
             let pre = custom.prepend.as_deref().unwrap_or(&custom.content);
             format!("{pre}\n\n{builtin}")
@@ -1032,29 +511,51 @@ fn apply_custom_merge(language: &str, config: Option<&Config>, builtin: &str) ->
     }
 }
 
-/// Get a prompt by language, checking custom config first, then built-ins.
-/// Supports merge modes: replace (default), prepend, append, merge.
-fn get_prompt(
+/// Build a complete language skillset: structured prompt + custom merge + guardrails.
+///
+/// This is the self-contained output for `promptctl show <lang>` and agent hooks.
+/// It includes everything an AI needs for a specific language — no overlap with the
+/// base instruction file.
+fn build_skillset(
     language: &str,
     config: Option<&Config>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let lang_lower = language.to_lowercase();
-    let builtin = prompts::get_builtin_prompt(&lang_lower);
 
-    // If we have config, try to resolve with merge logic
-    if let Some(cfg) = config {
-        if let Some(resolved) = cfg.resolve_prompt(&lang_lower, builtin) {
-            return Ok(resolved);
+    // Try structured prompt first (smart + full for maximum skillset coverage)
+    let base = if let Some(structured) = prompts::get_structured_prompt(&lang_lower) {
+        let scan_path = std::env::current_dir().unwrap_or_default();
+        let index = ProjectIndex::scan(&scan_path);
+        let builder = PromptBuilder::new().size(PromptSize::Full).smart(true);
+
+        format!(
+            "# {} Development Guidelines\n\n{}",
+            language.to_uppercase(),
+            builder.build(&structured, Some(&index))
+        )
+    } else {
+        // Fall back to raw builtin prompt
+        let builtin = prompts::get_builtin_prompt(&lang_lower);
+
+        if let Some(cfg) = config {
+            if let Some(resolved) = cfg.resolve_prompt(&lang_lower, builtin) {
+                return Ok(resolved);
+            }
         }
-    }
 
-    // Fall back to built-in prompts
-    builtin
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            format!(
-                "unknown language: '{language}'. Use 'promptctl list' to see available prompts."
-            )
-            .into()
-        })
+        builtin
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                format!(
+                    "unknown language: '{language}'. Use 'promptctl list' to see available prompts."
+                )
+            })?
+    };
+
+    // Apply custom merge if configured
+    let merged = apply_custom_merge(&lang_lower, config, &base);
+
+    // Append language-specific guardrails
+    let guardrails = agents::hallucination_guardrails(&lang_lower);
+    Ok(format!("{merged}\n\n{guardrails}"))
 }

@@ -118,6 +118,7 @@ pub enum AppError {
 ### Clippy & Formatting
 - Run `cargo fmt` before committing
 - Enable pedantic clippy: `#![warn(clippy::pedantic)]`
+- Code must pass `cargo clippy --pedantic`
 - Address all warnings; use `#[expect(...)]` with reason for suppressions
 - Use `rustfmt.toml` for team-wide formatting consistency
 
@@ -301,10 +302,25 @@ pub enum AppError {
                 title: "Clippy & Formatting".to_string(),
                 content: r#"- Run `cargo fmt` before committing
 - Enable pedantic clippy: `#![warn(clippy::pedantic)]`
-- Address all warnings; use `#[allow(...)]` sparingly with justification
+- Code must pass `cargo clippy --pedantic`
+- Address all warnings; use `#[expect(lint)]` with reason for suppressions
 - Use `rustfmt.toml` for team-wide formatting consistency"#
                     .to_string(),
                 relevance_keywords: vec!["clippy", "fmt", "format", "lint", "rustfmt"],
+            },
+            PromptSection {
+                section: Section::Security,
+                title: "Security".to_string(),
+                content: r#"- Every `unsafe` block must have a documented safety comment
+- Use `cargo audit` and `cargo deny` in CI
+- Validate all external input before processing
+- Use `secrecy` crate for sensitive values (keys, tokens)
+- Prefer `ring` or `rustls` over OpenSSL bindings
+- Avoid `unsafe` unless absolutely necessary; isolate it behind safe abstractions
+- Use constant-time comparison for secrets (`subtle` crate)
+- Pin dependencies and audit lock file changes"#
+                    .to_string(),
+                relevance_keywords: vec!["security", "unsafe", "audit", "crypto", "vulnerability"],
             },
         ],
     }

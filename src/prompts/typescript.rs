@@ -460,6 +460,21 @@ type User = z.infer<typeof UserSchema>;
                 relevance_keywords: vec!["tsconfig", "eslint", "prettier", "zod", "validation"],
             },
             PromptSection {
+                section: Section::Security,
+                title: "Security".to_string(),
+                content: r#"- Always use `zod` (or similar) for schema validation at API boundaries
+- Never use `any`; use `unknown` with narrowing if necessary
+- Sanitize all dangerous HTML (use DOMPurify or equivalent)
+- Validate all API inputs on the server side, never trust client
+- Use `helmet` for HTTP security headers in Node.js
+- Escape user input in templates to prevent XSS
+- Use `crypto.randomUUID()` for IDs, never `Math.random()`
+- Implement CSRF protection on state-changing endpoints
+- Use Content Security Policy headers"#
+                    .to_string(),
+                relevance_keywords: vec!["security", "xss", "csrf", "validation", "sanitize", "helmet"],
+            },
+            PromptSection {
                 section: Section::Patterns,
                 title: "Common Patterns".to_string(),
                 content: r#"```typescript
@@ -481,6 +496,19 @@ function toUserId(id: string): UserId { return id as UserId; }
 ```"#
                     .to_string(),
                 relevance_keywords: vec!["pattern", "builder", "factory", "brand"],
+            },
+            PromptSection {
+                section: Section::Dependencies,
+                title: "Framework Awareness".to_string(),
+                content: r#"**Next.js:** Use Server Components (RSC) by default. Use `'use client'` only for interactivity (event handlers, hooks, browser APIs). Prefer Server Actions for mutations.
+
+**React:** Prefer Composition over Context for state where possible. Use `tanstack-query` for async server state. Minimize `useEffect` — derive state instead.
+
+**Node.js:** Use `node:` protocol for builtins (`import fs from "node:fs"`). Prefer `fetch` over `axios`. Use `dotenv` for config, never hardcode secrets.
+
+**Testing:** Prefer `vitest` and `@testing-library` patterns (user-centric testing). Use `msw` for API mocking."#
+                    .to_string(),
+                relevance_keywords: vec!["next", "react", "node", "framework", "server", "component"],
             },
         ],
     }

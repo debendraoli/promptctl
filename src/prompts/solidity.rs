@@ -1,30 +1,38 @@
 //! Solidity smart contract prompt template.
+//!
+//! Gold Standard: adversarial mindset, Safety > Gas, CEI pattern,
+//! Foundry-first tooling, explicit vulnerability checks.
 
 use crate::prompt_builder::{PromptSection, Section, StructuredPrompt};
 
-pub const SOLIDITY_PROMPT: &str = r#"# Solidity Development Guidelines (0.8.28)
+pub const SOLIDITY_PROMPT: &str = r#"# Solidity Development Guidelines (0.8.33)
+
+> **Adversarial Mindset:** Assume every external caller is a contract designed to exploit you.
+> **Safety > Gas. Always.** Never sacrifice correctness or security for gas savings.
 
 ## Language Version
-- Target **Solidity 0.8.28** (latest stable)
-- Use `pragma solidity ^0.8.28;` for production contracts
+- Target **Solidity 0.8.33** (latest stable)
+- Use `pragma solidity ^0.8.33;` for production contracts
 - Enable optimizer with 200+ runs for deployed contracts
 - Use `via-ir` pipeline for complex contracts
+- Require explicit `override` on all inherited functions
 
 ## Contract Structure
 
 ### Layout Convention
 ```solidity
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.28;
+pragma solidity ^0.8.33;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title Token Contract
 /// @author Your Name
 /// @notice Brief description
 /// @dev Implementation details
-contract MyToken is ERC20, Ownable {
+contract MyToken is ERC20, Ownable, ReentrancyGuard {
     // Type declarations
     struct User { address addr; uint256 balance; }
     enum Status { Active, Paused, Stopped }
@@ -38,9 +46,10 @@ contract MyToken is ERC20, Ownable {
     // Events
     event Minted(address indexed to, uint256 amount);
 
-    // Errors (gas efficient vs require strings)
+    // Errors (always prefer custom errors — gas efficient)
     error InsufficientBalance(uint256 available, uint256 required);
     error Unauthorized(address caller);
+    error ZeroAddress();
 
     // Modifiers
     modifier onlyActive() {
@@ -53,7 +62,7 @@ contract MyToken is ERC20, Ownable {
         deployedAt = block.timestamp;
     }
 
-    // External functions
+    // External functions (nonReentrant on state-changing)
     // Public functions
     // Internal functions
     // Private functions
@@ -65,9 +74,9 @@ contract MyToken is ERC20, Ownable {
 ### Value Types
 ```solidity
 // Fixed-size types
-uint256 amount;      // 256-bit unsigned (use uint256 explicitly)
+uint256 amount;      // 256-bit unsigned (always use uint256 explicitly)
 int128 delta;        // 128-bit signed
-address owner;       // 20 bytes
+address owner;       // 20 bytes — NEVER trust msg.sender blindly
 address payable recipient;  // Can receive ETH
 bool active;         // true/false
 bytes32 hash;        // Fixed-size byte array
@@ -77,8 +86,8 @@ type TokenId is uint256;
 type Price is uint128;
 
 function process(TokenId id) external {
-    uint256 raw = TokenId.unwrap(id);  // Extract underlying
-    TokenId newId = TokenId.wrap(raw + 1);  // Create new
+    uint256 raw = TokenId.unwrap(id);
+    TokenId newId = TokenId.wrap(raw + 1);
 }
 ```
 
@@ -88,7 +97,7 @@ function process(TokenId id) external {
 uint256[] dynamicArray;
 uint256[10] fixedArray;
 
-// Mappings (cannot iterate, no length)
+// Mappings (cannot iterate, no length, no deletion)
 mapping(address => uint256) balances;
 mapping(address => mapping(address => uint256)) allowances;
 
@@ -102,14 +111,16 @@ struct Order {
 
 ## Error Handling
 
-### Custom Errors (preferred)
+### Custom Errors (always preferred)
 ```solidity
 // Gas efficient: ~100 gas vs ~2000 for require with string
 error InsufficientBalance(uint256 available, uint256 required);
 error Unauthorized();
 error InvalidInput(string reason);
+error ZeroAddress();
 
 function withdraw(uint256 amount) external {
+    if (msg.sender == address(0)) revert ZeroAddress();
     uint256 balance = balances[msg.sender];
     if (balance < amount) {
         revert InsufficientBalance(balance, amount);
@@ -124,7 +135,7 @@ function withdraw(uint256 amount) external {
 require(amount > 0, "Amount must be positive");
 require(msg.sender == owner, "Not owner");
 
-// assert: Invariants that should never fail
+// assert: Invariants that should NEVER fail (bug detection)
 assert(totalSupply == sumOfBalances);
 
 // revert: Complex conditions with custom errors
@@ -132,9 +143,9 @@ if (block.timestamp < unlockTime) {
     revert TooEarly(block.timestamp, unlockTime);
 }
 
-// try/catch for external calls
+// try/catch for external calls — DO NOT trust external return values
 try externalContract.call() returns (uint256 result) {
-    // Success
+    // Validate result before using
 } catch Error(string memory reason) {
     // require/revert with string
 } catch (bytes memory lowLevelData) {
@@ -144,30 +155,36 @@ try externalContract.call() returns (uint256 result) {
 
 ## Security Patterns
 
-### Reentrancy Protection
+> **Rule #1:** Assume the caller is a contract looking to exploit you.
+> **Rule #2:** Safety > Gas. Always.
+> **Rule #3:** Every external call is a potential attack vector.
+
+### Reentrancy Protection (MANDATORY)
 ```solidity
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract Vault is ReentrancyGuard {
     mapping(address => uint256) private _balances;
 
-    // Checks-Effects-Interactions pattern
+    // ALWAYS use Checks-Effects-Interactions (CEI) pattern
     function withdraw(uint256 amount) external nonReentrant {
-        // Checks
+        // 1. CHECKS — validate all conditions
         uint256 balance = _balances[msg.sender];
-        require(balance >= amount, "Insufficient");
+        if (balance < amount) revert InsufficientBalance(balance, amount);
 
-        // Effects (state changes BEFORE external calls)
+        // 2. EFFECTS — update state BEFORE any external call
         _balances[msg.sender] = balance - amount;
 
-        // Interactions (external calls LAST)
+        // 3. INTERACTIONS — external calls LAST, always
         (bool success, ) = msg.sender.call{value: amount}("");
         require(success, "Transfer failed");
+
+        // NEVER update state after an external call
     }
 }
 ```
 
-### Access Control
+### Access Control (EVERY public/external function needs explicit authorization)
 ```solidity
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
@@ -180,27 +197,43 @@ contract MyContract is AccessControl {
         _grantRole(ADMIN_ROLE, msg.sender);
     }
 
+    // Missing modifiers = critical vulnerability
     function mint(address to, uint256 amount) external onlyRole(MINTER_ROLE) {
+        if (to == address(0)) revert ZeroAddress();
         _mint(to, amount);
     }
 }
 ```
 
-### Safe Math & Overflow
+### Unchecked Math (use with extreme caution)
 ```solidity
-// 0.8.0+ has built-in overflow checks
+// 0.8.0+ has built-in overflow checks — do NOT disable unless provably safe
 uint256 a = type(uint256).max;
-uint256 b = a + 1;  // Reverts automatically!
+uint256 b = a + 1;  // Reverts automatically
 
-// unchecked for gas optimization (when safe)
+// unchecked: ONLY when overflow is mathematically impossible
+// Document WHY it's safe in a comment
 function incrementCounter() external {
     unchecked {
-        counter++;  // Saves ~100 gas if overflow impossible
+        // Safe: counter < type(uint256).max is guaranteed by MAX_COUNT check above
+        counter++;
     }
 }
 ```
 
+### Additional Security Checklist
+- **Front-running:** Use commit-reveal or deadline parameters for price-sensitive operations
+- **Flash loans:** Validate state consistency within the same transaction
+- **Signature replay:** Include chain ID + nonce + deadline in signed messages
+- **Denial of Service:** Avoid unbounded loops over user-controlled arrays
+- **Oracle manipulation:** Use TWAP or multiple oracle sources, never spot prices
+- **tx.origin:** NEVER use `tx.origin` for authorization — use `msg.sender`
+- **delegatecall:** Extremely dangerous — storage layout must match exactly
+- **selfdestruct:** Deprecated since 0.8.24; force-sent ETH bypasses receive/fallback
+
 ## Gas Optimization
+
+> Remember: **Safety > Gas. Always.** Only optimize gas after correctness is proven.
 
 ### Storage Patterns
 ```solidity
@@ -221,7 +254,7 @@ uint256 public immutable deployTime;
 // Use constant for compile-time constants
 uint256 public constant FEE_DENOMINATOR = 10000;
 
-// Transient storage (0.8.24+) - cleared after transaction
+// Transient storage (0.8.24+) — cleared after transaction
 contract Lock {
     bytes32 constant LOCK_SLOT = keccak256("lock");
 
@@ -272,6 +305,8 @@ function transfer(address to, uint256 amount) external {
 
 ## Testing
 
+> Generate all test output compatible with **Foundry/Forge** (`forge test`).
+
 ```solidity
 // Foundry test
 import {Test, console} from "forge-std/Test.sol";
@@ -306,17 +341,39 @@ contract TokenTest is Test {
         ));
         token.transfer(bob, 2000e18);
     }
+
+    // ALWAYS test reentrancy attacks explicitly
+    function test_ReentrancyAttack() public {
+        Attacker attacker = new Attacker(address(token));
+        deal(address(token), address(attacker), 100e18);
+        vm.expectRevert();
+        attacker.attack();
+    }
+
+    // ALWAYS test access control
+    function testRevert_UnauthorizedMint() public {
+        vm.prank(alice);  // alice has no MINTER_ROLE
+        vm.expectRevert();
+        token.mint(alice, 1000e18);
+    }
 }
 ```
 
 ## CLI & Tooling
 
 ```bash
-# Foundry (recommended)
+# Foundry (recommended — all output must be compatible)
 forge init my_project
 forge build
 forge test -vvv
+forge coverage
+forge snapshot                # Gas benchmarks
 forge script script/Deploy.s.sol --rpc-url $RPC_URL --broadcast
+forge verify-contract <addr> src/Token.sol:Token --etherscan-api-key $KEY
+
+# Static analysis (run before every audit)
+slither .                     # Detects common vulnerabilities
+mythril analyze src/Token.sol # Symbolic execution
 
 # Hardhat alternative
 npx hardhat compile
@@ -333,10 +390,11 @@ pub fn structured_prompt() -> StructuredPrompt {
             PromptSection {
                 section: Section::Version,
                 title: "Language Version".to_string(),
-                content: r#"- Target **Solidity 0.8.28** (latest stable)
-- Use `pragma solidity ^0.8.28;` for production contracts
+                content: r#"- Target **Solidity 0.8.33** (latest stable)
+- Use `pragma solidity ^0.8.33;` for production contracts
 - Enable optimizer with 200+ runs for deployed contracts
-- Use `via-ir` pipeline for complex contracts"#
+- Use `via-ir` pipeline for complex contracts
+- Require explicit `override` on all inherited functions"#
                     .to_string(),
                 relevance_keywords: vec!["solidity", "version", "pragma", "evm"],
             },
@@ -349,15 +407,18 @@ Within contract: Type declarations → State variables → Events → Errors →
 
 ```solidity
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.28;
+pragma solidity ^0.8.33;
 
-contract MyContract {
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+contract MyContract is ReentrancyGuard {
     uint256 public constant MAX = 100;
     uint256 public immutable deployedAt;
     uint256 private _value;
 
     event ValueChanged(uint256 newValue);
     error InvalidValue(uint256 value);
+    error ZeroAddress();
 
     constructor() { deployedAt = block.timestamp; }
 }
@@ -376,45 +437,63 @@ contract MyContract {
 type Price is uint128;
 mapping(address => uint256) balances;
 struct Order { address maker; uint256 amount; }
-```"#
+```
+
+Prefer `uint256` over smaller types in function parameters (EVM operates on 256-bit words)."#
                     .to_string(),
                 relevance_keywords: vec!["type", "mapping", "struct", "uint", "address"],
             },
             PromptSection {
                 section: Section::ErrorHandling,
                 title: "Error Handling".to_string(),
-                content: r#"**Custom errors** (gas efficient, ~100 gas vs ~2000 for require strings):
+                content: r#"**Always use custom errors** (gas efficient, ~100 gas vs ~2000 for require strings):
 ```solidity
 error InsufficientBalance(uint256 available, uint256 required);
 error Unauthorized();
+error ZeroAddress();
 
 function withdraw(uint256 amount) external {
-    if (balances[msg.sender] < amount) {
-        revert InsufficientBalance(balances[msg.sender], amount);
+    if (msg.sender == address(0)) revert ZeroAddress();
+    uint256 balance = balances[msg.sender];
+    if (balance < amount) {
+        revert InsufficientBalance(balance, amount);
     }
 }
 ```
 
-Use `require` for input validation, `assert` for invariants, try/catch for external calls."#
+Use `require` for input validation, `assert` for invariants (bug detection), try/catch for external calls.
+**Never trust return values from external calls without validation.**"#
                     .to_string(),
                 relevance_keywords: vec!["error", "require", "revert", "assert", "catch"],
             },
             PromptSection {
                 section: Section::Security,
                 title: "Security Patterns".to_string(),
-                content: r#"**Reentrancy:** Use ReentrancyGuard or Checks-Effects-Interactions pattern
+                content: r#"> **Adversarial Mindset:** Assume every external caller is a contract designed to exploit you.
+> **Safety > Gas. Always.** Never sacrifice correctness for gas savings.
+> **Every external call is a potential attack vector.**
+
+**Reentrancy (MANDATORY — CEI pattern):**
 ```solidity
 function withdraw(uint256 amount) external nonReentrant {
+    // 1. CHECKS — validate all conditions
     uint256 balance = _balances[msg.sender];
-    require(balance >= amount);
-    _balances[msg.sender] = balance - amount;  // Effect before interaction
+    if (balance < amount) revert InsufficientBalance(balance, amount);
+    // 2. EFFECTS — update state BEFORE external calls
+    _balances[msg.sender] = balance - amount;
+    // 3. INTERACTIONS — external calls LAST, always
     (bool success,) = msg.sender.call{value: amount}("");
     require(success);
+    // NEVER update state after an external call
 }
 ```
 
-**Access Control:** Use OpenZeppelin's AccessControl or Ownable
-**Overflow:** Built-in since 0.8.0; use `unchecked` only when safe"#
+**Access Control:** Every public/external state-changing function MUST have explicit authorization. Missing modifiers = critical vulnerability.
+**Unchecked Math:** Built-in since 0.8.0; use `unchecked` ONLY when overflow is mathematically provable impossible, and document WHY.
+**Front-running:** Use commit-reveal or deadline parameters for price-sensitive ops.
+**tx.origin:** NEVER use for authorization — use `msg.sender`.
+**delegatecall:** Extremely dangerous — storage layout must match exactly.
+**selfdestruct:** Deprecated since 0.8.24; force-sent ETH bypasses receive/fallback."#
                     .to_string(),
                 relevance_keywords: vec![
                     "security",
@@ -422,15 +501,22 @@ function withdraw(uint256 amount) external nonReentrant {
                     "access",
                     "overflow",
                     "audit",
+                    "exploit",
+                    "CEI",
+                    "vulnerability",
+                    "attack",
+                    "frontrun",
                 ],
             },
             PromptSection {
                 section: Section::Memory,
                 title: "Gas Optimization".to_string(),
-                content: r#"- Pack storage variables (32-byte slots)
+                content: r#"> **Safety > Gas. Always.** Only optimize after correctness is proven.
+
+- Pack storage variables (32-byte slots)
 - Use `immutable` for constructor-set values, `constant` for compile-time
 - Use `calldata` for read-only external params
-- Use `unchecked` for safe arithmetic
+- Use `unchecked` only when mathematically provable safe (document WHY)
 - Use transient storage (0.8.24+) for reentrancy locks
 
 ```solidity
@@ -451,8 +537,9 @@ uint128 c;               uint128 c;  // Same slot as b
             PromptSection {
                 section: Section::Testing,
                 title: "Testing".to_string(),
-                content: r#"```solidity
-// Foundry test
+                content: r#"> Generate all test output compatible with **Foundry/Forge** (`forge test`).
+
+```solidity
 import {Test} from "forge-std/Test.sol";
 
 contract TokenTest is Test {
@@ -474,27 +561,78 @@ contract TokenTest is Test {
         amount = bound(amount, 0, 1000e18);
         // ...
     }
+
+    // ALWAYS test reentrancy attacks explicitly
+    function test_ReentrancyAttack() public {
+        Attacker attacker = new Attacker(address(token));
+        vm.expectRevert();
+        attacker.attack();
+    }
+
+    // ALWAYS test access control
+    function testRevert_UnauthorizedMint() public {
+        vm.prank(alice);
+        vm.expectRevert();
+        token.mint(alice, 1000e18);
+    }
 }
 ```"#
                     .to_string(),
-                relevance_keywords: vec!["test", "foundry", "forge", "fuzz", "assert"],
+                relevance_keywords: vec![
+                    "test",
+                    "foundry",
+                    "forge",
+                    "fuzz",
+                    "assert",
+                    "reentrancy",
+                    "attack",
+                ],
             },
             PromptSection {
                 section: Section::Tooling,
                 title: "Tooling".to_string(),
                 content: r#"```bash
-# Foundry (recommended)
+# Foundry (recommended — all output must be Foundry-compatible)
 forge init my_project
 forge build
 forge test -vvv
+forge coverage
+forge snapshot                # Gas benchmarks
 forge script script/Deploy.s.sol --rpc-url $RPC --broadcast
 
-# Hardhat
-npx hardhat compile
-npx hardhat test
+# Static analysis (run before every audit)
+slither .
+mythril analyze src/Token.sol
 ```"#
                     .to_string(),
-                relevance_keywords: vec!["foundry", "hardhat", "forge", "deploy", "compile"],
+                relevance_keywords: vec![
+                    "foundry",
+                    "hardhat",
+                    "forge",
+                    "deploy",
+                    "compile",
+                    "slither",
+                    "mythril",
+                ],
+            },
+            PromptSection {
+                section: Section::Dependencies,
+                title: "Dependencies & Frameworks".to_string(),
+                content: r#"- **OpenZeppelin Contracts** (v5.x) — battle-tested base contracts, always prefer over hand-rolled
+- **Foundry** — primary build/test/deploy toolchain; all generated code must pass `forge test`
+- **Slither** + **Mythril** — static analysis before any audit or deployment
+- Prefer `forge install` over npm for Solidity dependencies
+- Pin dependency versions in `foundry.toml` remappings
+- Never hand-roll access control, reentrancy guards, or ERC implementations — use OpenZeppelin"#
+                    .to_string(),
+                relevance_keywords: vec![
+                    "openzeppelin",
+                    "foundry",
+                    "dependency",
+                    "framework",
+                    "library",
+                    "import",
+                ],
             },
             PromptSection {
                 section: Section::Patterns,
@@ -506,11 +644,12 @@ contract MyToken is ERC20 {
     constructor() ERC20("Name", "SYM") { _mint(msg.sender, 1000000e18); }
 }
 
-// Proxy/Upgradeable
+// Proxy/Upgradeable (audit storage layout carefully)
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 // Factory pattern
 function createPair(address t0, address t1) external returns (address pair) {
+    if (t0 == address(0) || t1 == address(0)) revert ZeroAddress();
     pair = address(new Pair(t0, t1));
 }
 ```"#

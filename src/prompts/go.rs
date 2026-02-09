@@ -348,6 +348,32 @@ func New(opts ...Option) *Client {
                     .to_string(),
                 relevance_keywords: vec!["fmt", "lint", "vet", "golangci", "goimports"],
             },
+            PromptSection {
+                section: Section::Security,
+                title: "Security".to_string(),
+                content: r#"- Use `context.Context` for cancellation and timeouts on all external calls
+- Validate all user input; use `validator` or custom validation
+- Use `crypto/rand` not `math/rand` for security-sensitive randomness
+- Sanitize SQL with parameterized queries (`sqlx`, `database/sql`)
+- Use `govulncheck` for dependency vulnerability scanning
+- Prevent goroutine leaks: always ensure goroutines can exit
+- Use `net/http` timeouts: `ReadTimeout`, `WriteTimeout`, `IdleTimeout`
+- Never log sensitive data (tokens, passwords, PII)"#
+                    .to_string(),
+                relevance_keywords: vec!["security", "validate", "crypto", "sql", "goroutine"],
+            },
+            PromptSection {
+                section: Section::Dependencies,
+                title: "Architecture & Dependencies".to_string(),
+                content: r#"- Follow Standard Go Project Layout (`cmd/`, `internal/`, `pkg/`)
+- Use dependency injection via constructor functions, not frameworks
+- Avoid ORMs if `sqlx` or `database/sql` serves better
+- Accept interfaces, return structs — keeps packages decoupled
+- Keep `main()` thin: parse config, wire dependencies, start server
+- Use `wire` or manual DI for complex dependency graphs"#
+                    .to_string(),
+                relevance_keywords: vec!["architecture", "dependency", "injection", "layout", "sqlx"],
+            },
         ],
     }
 }

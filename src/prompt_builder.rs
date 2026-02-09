@@ -4,37 +4,22 @@ use crate::indexer::ProjectIndex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-/// Available prompt sections
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Section {
-    /// Language version and edition info
     Version,
-    /// Code style and idioms
     Style,
-    /// Error handling patterns
     ErrorHandling,
-    /// Type system usage
     Types,
-    /// Memory and performance
     Memory,
-    /// Concurrency patterns
     Concurrency,
-    /// Async programming
     Async,
-    /// Testing strategies
     Testing,
-    /// Project structure
     Structure,
-    /// Dependencies management
     Dependencies,
-    /// Documentation practices
     Documentation,
-    /// Common patterns and examples
     Patterns,
-    /// Tooling (linting, formatting)
     Tooling,
-    /// Security best practices
     Security,
 }
 
@@ -58,6 +43,7 @@ impl Section {
         ]
     }
 
+    #[allow(dead_code)]
     pub const fn name(&self) -> &'static str {
         match self {
             Section::Version => "version",
@@ -77,6 +63,7 @@ impl Section {
         }
     }
 
+    #[allow(dead_code)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "version" => Some(Section::Version),
@@ -138,6 +125,7 @@ pub enum PromptSize {
 }
 
 impl PromptSize {
+    #[allow(dead_code)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "minimal" | "min" | "tiny" | "small" => Some(PromptSize::Minimal),
@@ -155,6 +143,7 @@ impl PromptSize {
         }
     }
 
+    #[allow(dead_code)]
     pub const fn name(&self) -> &'static str {
         match self {
             PromptSize::Minimal => "minimal",
@@ -278,6 +267,7 @@ impl PromptBuilder {
         self
     }
 
+    #[allow(dead_code)]
     pub fn sections(mut self, sections: HashSet<Section>) -> Self {
         self.sections = Some(sections);
         self
